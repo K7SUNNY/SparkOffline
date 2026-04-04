@@ -1,0 +1,183 @@
+/* ==================== MEMORY PAGE STYLES ==================== */
+:root {
+    /* ... your existing variables ... */
+    
+    /* Default (Dark Mode) Danger Colors */
+    --danger-bg: rgba(239, 68, 68, 0.1);    /* Faint Red */
+    --danger-text: #ef4444;                 /* Bright Red */
+    --danger-border: rgba(239, 68, 68, 0.2);
+}
+
+[data-theme="light"] {
+    /* ... your existing light variables ... */
+    
+    /* Light Mode Danger Colors (Darker text for readability) */
+    --danger-bg: #fee2e2;                   /* Solid light pale red */
+    --danger-text: #dc2626;                 /* Darker Red 600 */
+    --danger-border: #fecaca;
+}
+
+.memory-container {
+    padding: 24px;
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.memory-tools {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.search-wrapper {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.search-icon {
+    position: absolute;
+    left: 12px;
+    color: var(--text-secondary);
+    pointer-events: none;
+    width: 16px; /* Ensure icon has size */
+    height: 16px;
+}
+
+.search-input {
+    width: 100%;
+    height: 40px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding-left: 36px;
+    color: var(--text-primary);
+    font-size: 14px;
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+.search-input:focus {
+    border-color: var(--text-primary);
+    /* Add subtle shadow on focus for Light Mode */
+    box-shadow: 0 0 0 2px var(--bg-hover);
+}
+
+/* Updated Danger Button using Variables */
+.btn-danger {
+    height: 40px;
+    padding: 0 16px;
+    background-color: var(--danger-bg);
+    border: 1px solid var(--danger-border);
+    color: var(--danger-text);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+}
+
+.btn-danger:hover {
+    opacity: 0.8; /* Simple hover effect that works for both modes */
+}
+
+.memory-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    padding-bottom: 24px;
+}
+
+.memory-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    animation: fadeIn 0.3s ease;
+    transition: all 0.2s ease;
+}
+
+/* Light Mode Polish: Add shadow so white cards stand out on white bg */
+[data-theme="light"] .memory-card {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    border-color: transparent; /* Cleaner look in light mode */
+}
+
+.memory-card:hover {
+    border-color: var(--text-secondary);
+    transform: translateY(-1px);
+}
+
+[data-theme="light"] .memory-card:hover {
+    border-color: var(--border-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.memory-text {
+    font-size: 14px;
+    color: var(--text-primary);
+    line-height: 1.5;
+    margin-right: 16px;
+}
+
+.memory-date {
+    display: block;
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 6px;
+}
+
+/* Updated Delete Icon Button */
+.delete-memory-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 6px; /* Slightly larger touch target */
+    border-radius: 6px;
+    transition: all 0.2s;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.delete-memory-btn:hover {
+    background-color: var(--danger-bg);
+    color: var(--danger-text);
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin-top: 48px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+/* ==================== MOBILE LAYOUT FIXES ==================== */
+@media (max-width: 768px) {
+    .memory-container {
+        /* Matches your new fixed header/nav heights */
+        padding-top: 88px; 
+        padding-bottom: 84px;
+        height: auto;
+        min-height: 100dvh;
+    }
+}

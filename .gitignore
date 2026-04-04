@@ -1,0 +1,49 @@
+# Python environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Test, coverage, and local runtime output
+.coverage
+.coverage.*
+htmlcov/
+*.log
+*.err
+*.out
+*.pid
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+config_test.txt
+
+# Editor and local tooling metadata
+.vscode/
+.idea/
+.agent/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local model artifacts and caches
+models/
+*.gguf
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors

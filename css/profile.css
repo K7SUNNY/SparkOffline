@@ -1,0 +1,387 @@
+/* ==================== PROFILE PAGE STYLES ==================== */
+:root {
+    /* ... existing variables ... */
+    
+    /* Hero Banner Gradient (Dark Mode Default) */
+    --hero-gradient-start: #27272a;
+    --hero-gradient-end: #18181b;
+
+    /* Pro Badge (Dark Mode Default: Bright Yellow) */
+    --badge-pro-bg: rgba(250, 204, 21, 0.15);
+    --badge-pro-text: #facc15;
+    --badge-pro-border: rgba(250, 204, 21, 0.2);
+}
+
+[data-theme="light"] {
+    /* ... existing light variables ... */
+    
+    /* Hero Banner Gradient (Light Mode: Soft Silver/Gray) */
+    --hero-gradient-start: #f4f4f5;
+    --hero-gradient-end: #e4e4e7;
+
+    /* Pro Badge (Light Mode: Dark Gold for readability) */
+    --badge-pro-bg: #fef9c3;   /* Solid pale yellow */
+    --badge-pro-text: #854d0e; /* Darker gold/brown text */
+    --badge-pro-border: #fde047;
+}
+
+/* ==================== SCROLL CONTAINER FIX ==================== */
+.main-content {
+    height: 100vh;
+    overflow: hidden; 
+    display: flex;
+    flex-direction: column;
+}
+
+.settings-scroll-area {
+    flex: 1; 
+    overflow-y: auto; 
+    padding: 20px;
+    padding-bottom: 100px; 
+}
+
+/* 1. Hero Card */
+.profile-hero-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+    margin-bottom: 32px;
+    /* Add shadow in light mode only */
+    transition: box-shadow 0.2s;
+}
+
+[data-theme="light"] .profile-hero-card {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    border-color: transparent;
+}
+
+.hero-bg {
+    height: 80px;
+    /* Updated to use variables */
+    background: linear-gradient(90deg, var(--hero-gradient-start) 0%, var(--hero-gradient-end) 100%);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.hero-content {
+    padding: 24px;
+    margin-top: -40px; 
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.hero-avatar-wrapper {
+    position: relative;
+    margin-bottom: 12px;
+}
+
+.hero-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    border: 4px solid var(--bg-card); /* Matches card bg color automatically */
+    object-fit: cover;
+}
+
+.avatar-edit-btn {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    background-color: var(--text-primary);
+    color: var(--bg-main);
+    border: none;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    transition: transform 0.2s;
+}
+
+.avatar-edit-btn:hover {
+    transform: scale(1.1);
+}
+
+.hero-name {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.hero-badges {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+/* Badges */
+.badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-weight: 500;
+}
+
+/* Updated Pro Badge */
+.badge-pro {
+    background-color: var(--badge-pro-bg);
+    color: var(--badge-pro-text);
+    border: 1px solid var(--badge-pro-border);
+}
+
+.badge-date {
+    background-color: var(--bg-hover);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+/* 2. Stats Grid */
+.stats-grid {
+    display: flex;
+    width: 100%;
+    border-top: 1px solid var(--border-color);
+    margin-top: 24px;
+}
+
+.stat-item {
+    flex: 1;
+    padding: 16px;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.stat-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-divider {
+    width: 1px;
+    background-color: var(--border-color);
+}
+
+/* 3. Forms */
+.form-card {
+    padding: 24px;
+}
+
+.form-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.form-row:last-child {
+    margin-bottom: 0;
+}
+
+.form-group {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.form-group label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.form-input {
+    background-color: var(--bg-main); /* White in Light Mode */
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: all 0.2s;
+}
+
+.form-input:focus {
+    border-color: var(--text-primary);
+    /* Add subtle shadow on focus for Light Mode visibility */
+    box-shadow: 0 0 0 2px var(--bg-hover);
+}
+
+/* 4. Plan Card */
+.plan-card {
+    padding: 20px;
+}
+
+.plan-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.plan-info h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.plan-info p {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.usage-container {
+    background-color: var(--bg-main);
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.usage-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.progress-bar {
+    height: 6px;
+    background-color: var(--bg-hover);
+    border-radius: 99px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.progress-fill {
+    height: 100%;
+    background-color: var(--text-primary); /* Black in Light Mode */
+    border-radius: 99px;
+}
+
+.usage-footer {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-align: right;
+}
+
+/* Mobile Adjustments */
+@media (max-width: 600px) {
+    .form-row { flex-direction: column; gap: 16px; }
+    .stats-grid { flex-direction: row; }
+    .stat-value { font-size: 16px; }
+    .stat-label { font-size: 10px; }
+}
+
+/* Mobile Scroll Fix */
+@media (max-width: 768px) {
+    .settings-scroll-area {
+        padding-bottom: 180px !important; 
+        /* padding-bottom: calc(100px + env(safe-area-inset-bottom)) !important; */
+    }
+}
+
+/* ==================== DANGER ZONE & ROWS ==================== */
+
+.setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    min-height: 64px;
+    gap: 12px;
+}
+
+.setting-label {
+    font-size: 14px;
+    color: var(--text-primary);
+    font-weight: 500;
+    margin-bottom: 2px;
+}
+
+.setting-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.setting-divider {
+    height: 1px;
+    background-color: var(--border-color);
+    margin: 0 16px;
+}
+
+/* Updated Danger Colors using Variables */
+.text-danger {
+    color: var(--danger-text) !important;
+}
+
+/* BUTTONS */
+
+/* 1. Base Button */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+    text-decoration: none;
+    outline: none;
+}
+
+/* 2. Secondary Button (Save & Sign Out) */
+.btn-secondary {
+    background-color: transparent;
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.btn-secondary:hover {
+    background-color: var(--bg-hover);
+    border-color: var(--text-secondary);
+}
+
+/* 3. Danger Button (Delete) */
+.btn-danger {
+    background-color: var(--danger-bg);
+    color: var(--danger-text);
+    /* border: 1px solid var(--danger-border); */
+    border-color: var(--border-color);
+}
+
+.btn-danger:hover {
+    opacity: 0.8;
+}
+
+/* 4. Small Button */
+.small-btn {
+    padding: 0 12px;
+    font-size: 12px;
+    height: 32px;
+    width: auto;
+    /* Basic styling fallback if .btn is not applied */
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+    border: none;
+    border-radius: 12px;
+}
