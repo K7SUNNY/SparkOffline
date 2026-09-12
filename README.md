@@ -1,176 +1,65 @@
-﻿# SparkV2 Offline (Personal Local Project)
+﻿# SparkV2 Offline (Qwen 3.5 Local AI)
 
-SparkV2 is a local-first AI chat app built for personal use and experimentation.
-It is not intended for production deployment.
-
-## What This Project Is
-
-- Local AI chat UI with streaming responses
-- Python Flask backend serving an OpenAI-style `/v1/chat/completions` endpoint
-- LoRA adapter support on top of a base LLM
-- Multi-page frontend (`Chat`, `Memory`, `Settings`, `Profile`)
-- Local browser persistence for chat history, theme, selected model, and memory items
-
-## Core Features
-
-- Streaming assistant output (SSE) in the chat UI
-- Model mode selection (`Spark Pro`, `Spark Fast`, `Spark Coding`)
-- Theme selection (`Dark`, `Light`, `System`) with persistence
-- Memory page with search, delete, and clear
-- Copy button for code blocks in assistant responses
-- Local backend health and cleanup endpoints
-
-## Tech Stack
-
-- Frontend: HTML, CSS, Vanilla JavaScript
-- Backend: Python, Flask, Flask-CORS
-- ML: `transformers`, `peft`, `torch`, `bitsandbytes`, `accelerate`
-
-## Project Structure
-
-- `index.html`: Main chat UI
-- `memory.html`: Local memory list UI
-- `settings.html`: Theme/model preference UI
-- `profile.html`: Profile screen UI
-- `js/script.js`: Frontend app behavior (chat UI, settings, memory, theme)
-- `js/offline-api.js`: API client, streaming parser, local chat/memory persistence
-- `server.py`: Flask API and model inference
-- `css/style.css`: Shared layout/theme styles
-- `css/memory.css`, `css/setting.css`, `css/profile.css`: Page-specific styles
-- `models/Spark_Llama3.2_v1`: Local adapter files
-
-## Requirements
-
-- Python 3.10+ (tested on 3.13)
-- Modern browser (Chrome/Edge/Firefox)
-- GPU recommended for the selected model (4-bit base model + adapter)
-
-Install Python dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-## Running Locally
-
-### 1. Start backend
-
-```bash
-python server.py
-```
-
-By default backend starts on:
-
-- `http://127.0.0.1:5000`
-
-### 2. Serve frontend files
-
-Use any static server from project root (example):
-
-```bash
-python -m http.server 5500
-```
-
-Then open:
-
-- `http://127.0.0.1:5500/index.html`
-
-## API Base Resolution (Frontend)
-
-`js/offline-api.js` resolves backend URL in this order:
-
-1. `window.SPARK_API_BASE` (if provided)
-2. `localStorage['spark_api_base']`
-3. Auto-detect fallback to `http://127.0.0.1:5000`
-
-This makes local static hosting and backend hosting work without hard failures.
-
-## Backend API Endpoints
-
-### `POST /v1/chat/completions`
-
-OpenAI-style chat endpoint.
-
-Request body (example):
-
-```json
-{
-  "messages": [
-    { "role": "user", "content": "Hello" }
-  ],
-  "stream": true,
-  "temperature": 0.7,
-  "max_tokens": 2048
-}
-```
-
-Validation includes:
-
-- JSON body required
-- `messages` must be a non-empty array
-- each message must include valid `role` and string `content`
-- `temperature` range: `0..2`
-- `max_tokens` range: `1..4096`
-
-### `GET /v1/health`
-
-Simple backend status check.
-
-### `POST /v1/cleanup`
-
-Runs Python GC and clears CUDA cache (if available).
-
-## Local Storage Keys
-
-The app stores data in browser localStorage:
-
-- `spark_chat_history`: conversation messages
-- `spark_memory`: memory records used by `memory.html`
-- `spark_default_model`: default selected model (`pro`, `fast`, `coding`)
-- `spark_theme`: `dark`, `light`, or `system`
-- `spark_api_base`: optional custom backend URL
-
-## Notes About Safety and Scope
-
-- This project is local/personal and optimized for convenience.
-- It now includes safer rendering paths for chat text and markdown output.
-- CORS is restricted to local origins (`localhost`, `127.0.0.1`, and `null`).
-- No production hardening (auth, TLS termination, deployment infra) is included.
-
-## Troubleshooting
-
-### Backend does not start
-
-- Ensure dependencies are installed (`pip install -r requirements.txt`)
-- Verify GPU/CUDA compatibility for your installed `torch` + `bitsandbytes`
-- Confirm model/adapters are present at `models/Spark_Llama3.2_v1`
-
-### Frontend shows server error
-
-- Confirm backend is running on `127.0.0.1:5000`
-- Check browser console for API URL and CORS errors
-- If needed, set custom API base:
-  - in devtools console: `localStorage.setItem('spark_api_base', 'http://127.0.0.1:5000')`
-
-### Theme/model not persisting
-
-- Ensure localStorage is enabled in browser
-- Clear stale values and reload:
-
-```js
-localStorage.removeItem('spark_theme');
-localStorage.removeItem('spark_default_model');
-location.reload();
-```
-
-## Current Status
-
-- Backend validation and local CORS: implemented
-- Frontend settings/memory behavior: implemented
-- Chat history/memory persistence: implemented
-- Accessibility and navigation consistency improvements: implemented
+SparkV2 is a high-performance, 100% offline local AI chat application powered by `Qwen3.5-2B-Q4_K_M.gguf`.
 
 ---
 
-Built as a local personal AI playground.
-## SparkOffline
+## ⚡ Quick Start (1-Click)
+
+### Option 1: Double-Click `start.bat`
+1. Double-click `start.bat` in the project root.
+2. It automatically starts the high-performance inference engine with **Vulkan GPU Acceleration** (NVIDIA/Intel) or universal CPU fallback.
+3. Automatically opens `http://localhost:5000/index.html` in your default browser.
+
+### Option 2: Run with Python
+```bash
+python server.py
+```
+Zero external Python packages required (pure standard library).
+
+### Option 3: PowerShell
+```powershell
+.\run.ps1
+```
+
+---
+
+## ✨ Features
+
+- **100% Offline & Private**: Zero data leaves your computer. No accounts, API keys, or internet needed.
+- **Hardware Acceleration**: Bundled with native Vulkan GPU acceleration (auto-detects NVIDIA GeForce MX350 / Intel Iris Plus) and universal CPU engine fallback.
+- **Qwen 3.5 Reasoning Display**: Chain-of-thought (`<think>` blocks) is visualized in a sleek collapsible thought process box with live indicator.
+- **Model Presets**:
+  - **Qwen 3.5 Pro**: Full 2048 token context with balanced temperature (0.7) for reasoning and general queries.
+  - **Qwen 3.5 Fast**: Snappy 1024 token generation with lower latency (temp 0.5).
+  - **Qwen 3.5 Coding**: Low temperature (0.2) for precise code synthesis and debugging.
+- **Live Markdown & Code Highlighting**: Syntax coloring for code blocks with one-click copy button.
+- **Memory & Session Storage**: Local persistence for conversation history, memory entries, and settings.
+- **Dark & Light Modes**: Theme preferences persist across sessions.
+
+---
+
+## 📁 Project Structure
+
+```
+SparkOffline/
+├── models/
+│   └── Qwen3.5-2B-Q4_K_M.gguf   # Local Qwen GGUF model
+├── bin/
+│   ├── llama-vulkan/            # GPU-accelerated Vulkan engine
+│   └── llama/                   # Universal CPU engine fallback
+├── js/
+│   ├── script.js                # UI logic, reasoning visualization, markdown render
+│   ├── offline-api.js           # API streaming client (SSE), memory & history store
+│   ├── marked.min.js            # Offline Markdown parser
+│   └── highlight.min.js         # Offline syntax highlighter
+├── css/
+│   └── style.css                # App design system & thought box styling
+├── index.html                   # Main chat interface
+├── memory.html                  # Local memory page
+├── settings.html                # Model and theme preferences
+├── profile.html                 # Profile page
+├── server.py                    # Standalone Python server
+├── start.bat                    # 1-Click launcher
+└── run.ps1                      # PowerShell launcher
+```

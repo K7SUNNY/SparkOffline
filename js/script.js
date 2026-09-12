@@ -1,4 +1,4 @@
-const STORAGE_KEYS = {
+﻿const STORAGE_KEYS = {
     theme: 'spark_theme',
     model: 'spark_default_model',
     memory: 'spark_memory'
@@ -46,6 +46,7 @@ function applyThemeSelection(selection) {
     }
 }
 
+// Marked.js Configuration with Code Highlighting & Copy Button
 const renderer = new marked.Renderer();
 renderer.code = function (tokenOrCode, lang) {
     let code;
@@ -65,7 +66,7 @@ renderer.code = function (tokenOrCode, lang) {
         .replace(/[^a-z0-9_+-]/g, '') || 'text';
     const displayLanguage = escapeHtml(normalizedLanguage);
 
-    let highlightedCode = code;
+    let highlightedCode = escapeHtml(code);
     if (window.hljs) {
         const validLang = hljs.getLanguage(normalizedLanguage) ? normalizedLanguage : 'plaintext';
         try {
@@ -74,8 +75,6 @@ renderer.code = function (tokenOrCode, lang) {
             console.error('Highlight error:', error);
             highlightedCode = escapeHtml(code);
         }
-    } else {
-        highlightedCode = escapeHtml(code);
     }
 
     return `
@@ -89,48 +88,69 @@ renderer.code = function (tokenOrCode, lang) {
     `;
 };
 
-marked.use({ renderer });
+marked.use({ renderer, breaks: true, gfm: true });
 
 function renderMarkdownSafe(rawText) {
-    const escaped = escapeHtml(rawText);
-    return marked.parse(escaped);
+    if (!rawText) return '';
+    let text = String(rawText);
+
+    // Format completed <think>...</think> reasoning blocks
+    text = text.replace(/<think>([\s\S]*?)<\/think>/gi, (match, thought) => {
+        const trimmed = thought.trim();
+        if (!trimmed) return '';
+        return `<details class="thought-box" open>
+            <summary class="thought-header">
+                <span class="thought-icon">🧠</span>
+                <span class="thought-label">Thinking Process</span>
+            </summary>
+            <div class="thought-body">${marked.parse(trimmed)}</div>
+        </details>`;
+    });
+
+    // Format unclosed <think> during active streaming
+    if (text.includes('<think>') && !text.includes('</think>')) {
+        const parts = text.split('<think>');
+        const before = parts[0] || '';
+        const thinking = parts[1] || '';
+        return (before ? marked.parse(before) : '') + `
+            <div class="thought-box streaming">
+                <div class="thought-header">
+                    <span class="thought-spinner"></span>
+                    <span class="thought-label">Thinking...</span>
+                </div>
+                <div class="thought-body">${marked.parse(thinking.trim())}</div>
+            </div>`;
+    }
+
+    return marked.parse(text);
 }
 
 let currentRawText = '';
-let typeQueue = ''; // Batched string instead of array
+let currentReasoningText = '';
+let currentContentText = '';
 let isTyping = false;
-const TYPING_FRAME_DELAY_MS = 20;
+let renderScheduled = false;
 window.aiBubble = null;
-let lastRenderTime = 0;
 
-function processQueue() {
-    if (typeQueue.length > 0) {
-        isTyping = true;
-        // Take up to chunks to batch processing
-        const chunkSize = Math.max(1, Math.floor(typeQueue.length / 4));
-        const chunk = typeQueue.substring(0, chunkSize);
-        typeQueue = typeQueue.substring(chunkSize);
+function scheduleRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
 
+    requestAnimationFrame(() => {
+        renderScheduled = false;
         if (window.aiBubble) {
-            currentRawText += chunk;
-            const now = performance.now();
-
-            // Re-render markdown at most every 50ms to prevent heavy thread blocking
-            if (now - lastRenderTime > 50 || typeQueue.length === 0) {
-                window.aiBubble.innerHTML = renderMarkdownSafe(currentRawText);
-                lastRenderTime = now;
-                const chatArea = document.querySelector('.chat-area');
-                if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
+            let combined = '';
+            if (currentReasoningText) {
+                combined += `<think>${currentReasoningText}</think>\n\n`;
             }
+            combined += currentContentText;
+            currentRawText = combined;
+            window.aiBubble.innerHTML = renderMarkdownSafe(combined);
+
+            const chatArea = document.querySelector('.chat-area');
+            if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
         }
-        setTimeout(processQueue, TYPING_FRAME_DELAY_MS);
-    } else {
-        isTyping = false;
-        // Final render to ensure complete accuracy
-        if (window.aiBubble && currentRawText) {
-            window.aiBubble.innerHTML = renderMarkdownSafe(currentRawText);
-        }
-    }
+    });
 }
 
 function initSidebar() {
@@ -197,21 +217,22 @@ function initChatPage() {
     const modelOptions = Array.from(document.querySelectorAll('.model-option'));
     const welcomeScreen = document.getElementById('welcome-screen');
     const mobileNav = document.querySelector('.mobile-bottom-nav');
+    const newChatBtn = document.querySelector('.new-chat-btn');
 
     let isGenerating = false;
     let abortController = null;
     let firstChunkReceived = false;
 
     const modelLabelByValue = {
-        pro: 'Spark Pro',
-        fast: 'Spark Fast',
-        coding: 'Spark Coding'
+        pro: 'Qwen 3.5 Pro',
+        fast: 'Qwen 3.5 Fast',
+        coding: 'Qwen 3.5 Coding'
     };
 
     const aiIcon = `
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
         fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1v2h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2v-2h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2Z"/>
+        <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1v2h-1v1a2 2 0 0 1 2 2H5a2 2 0 0 1-2-2v-1H2v-2h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2Z"/>
         </svg>`;
 
     function scrollToBottom() {
@@ -290,7 +311,7 @@ function initChatPage() {
 
         if (active) {
             sendBtn.disabled = false;
-            sendBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`;
+            sendBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`;
             sendBtn.title = 'Stop Generation';
             sendBtn.setAttribute('aria-label', 'Stop generation');
         } else {
@@ -314,8 +335,6 @@ function initChatPage() {
 
         if (typeof window.updateModel === 'function') {
             window.updateModel(resolved);
-        } else {
-            console.warn('updateModel function not available. Model is stored for next load.');
         }
     }
 
@@ -339,6 +358,26 @@ function initChatPage() {
         });
     }
 
+    // New Chat Action: resets conversation cleanly without page reload flash
+    newChatBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (isGenerating && abortController) {
+            abortController.abort();
+        }
+        if (typeof window.clearConversationHistory === 'function') {
+            window.clearConversationHistory();
+        }
+        chatArea.innerHTML = `
+            <div id="welcome-screen" class="welcome-screen">
+                <h2>Hey, I'm Spark</h2>
+                <p>Powered by Qwen 3.5 local model. Ask me anything...</p>
+            </div>
+        `;
+        setGeneratingState(false);
+        chatInput.value = '';
+        chatInput.focus();
+    });
+
     function handleFormSubmit() {
         if (isGenerating) {
             if (abortController) {
@@ -361,17 +400,18 @@ function initChatPage() {
         const loadingId = showTypingIndicator();
 
         currentRawText = '';
-        typeQueue = '';
+        currentReasoningText = '';
+        currentContentText = '';
         window.aiBubble = null;
         firstChunkReceived = false;
 
-        fetchAndStreamResponse(message, abortController.signal, (chunk, isDone) => {
+        fetchAndStreamResponse(message, abortController.signal, (chunk, isDone, isReasoning) => {
             if (chunk && chunk.startsWith('[System Error]')) {
                 removeTypingIndicator(loadingId);
                 const errorBubble = appendMessage(chunk, 'ai');
                 if (errorBubble) {
                     const retryBtn = document.createElement('button');
-                    retryBtn.className = 'btn copy-btn'; // reuse copy-btn styling for convenience
+                    retryBtn.className = 'btn copy-btn';
                     retryBtn.style.marginTop = '8px';
                     retryBtn.style.display = 'block';
                     retryBtn.textContent = 'Retry';
@@ -395,12 +435,25 @@ function initChatPage() {
             }
 
             if (chunk) {
-                typeQueue += chunk;
-                if (!isTyping) processQueue();
+                if (isReasoning) {
+                    currentReasoningText += chunk;
+                } else {
+                    currentContentText += chunk;
+                }
+                scheduleRender();
             }
 
             if (isDone) {
                 if (!firstChunkReceived) removeTypingIndicator(loadingId);
+                // Final flush render
+                if (window.aiBubble) {
+                    let finalCombined = '';
+                    if (currentReasoningText) {
+                        finalCombined += `<think>${currentReasoningText}</think>\n\n`;
+                    }
+                    finalCombined += currentContentText;
+                    window.aiBubble.innerHTML = renderMarkdownSafe(finalCombined);
+                }
                 setGeneratingState(false);
                 abortController = null;
             }
@@ -475,6 +528,27 @@ function initChatPage() {
     const initialModel = localStorage.getItem(STORAGE_KEYS.model) || 'pro';
     setSelectedModel(initialModel);
     hydrateChatHistory();
+
+    // Check server status indicator
+    updateServerStatusIndicator();
+    setInterval(updateServerStatusIndicator, 8000);
+}
+
+async function updateServerStatusIndicator() {
+    const indicator = document.getElementById('server-status-dot');
+    const label = document.getElementById('server-status-label');
+    if (!indicator) return;
+
+    const isAlive = await window.checkServerHealth?.();
+    if (isAlive) {
+        indicator.style.backgroundColor = '#10b981';
+        indicator.title = 'Model Server: Online';
+        if (label) label.textContent = 'Qwen Online';
+    } else {
+        indicator.style.backgroundColor = '#ef4444';
+        indicator.title = 'Model Server: Offline';
+        if (label) label.textContent = 'Offline';
+    }
 }
 
 function initMemoryPage() {

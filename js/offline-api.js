@@ -1,29 +1,27 @@
-/**
- * SparkV2 Offline API
- * Handles communication with the local Python server
+﻿/**
+ * SparkV2 Offline API Client
+ * Handles streaming communication with the local Qwen model engine
  */
 
-// Global conversation history
 let conversationHistory = [];
 let currentModel = localStorage.getItem('spark_default_model') || 'pro';
 
-// Model configuration
+// Model configuration optimized for Qwen3.5-2B
 const modelConfigs = {
-    'pro': { temperature: 0.7, max_tokens: 512 },
-    'fast': { temperature: 0.5, max_tokens: 256 },
-    'coding': { temperature: 0.3, max_tokens: 768 }
+    'pro': { temperature: 0.7, max_tokens: 2048, name: 'Qwen 3.5 Pro' },
+    'fast': { temperature: 0.5, max_tokens: 1024, name: 'Qwen 3.5 Fast' },
+    'coding': { temperature: 0.2, max_tokens: 2048, name: 'Qwen 3.5 Coding' }
 };
-const MAX_CONTEXT_MESSAGES = 12;
+const MAX_CONTEXT_MESSAGES = 16;
 
 function resolveApiBase() {
     const explicit = window.SPARK_API_BASE || localStorage.getItem('spark_api_base');
     if (explicit) return String(explicit).replace(/\/+$/, '');
 
-    const isLocalBackendOrigin =
-        (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') &&
-        window.location.port === '5000';
-
-    if (isLocalBackendOrigin) return window.location.origin;
+    // If currently hosted on port 5000 or similar, use same origin
+    if (window.location.port === '5000' || window.location.port === '8080') {
+        return window.location.origin;
+    }
     return 'http://127.0.0.1:5000';
 }
 
@@ -85,7 +83,6 @@ function buildRequestMessages(history) {
 
 conversationHistory = loadConversationHistory();
 
-// Update model selection
 window.updateModel = function (modelKey) {
     if (!modelConfigs[modelKey]) {
         console.warn(`Unknown model "${modelKey}". Falling back to "pro".`);
@@ -99,14 +96,12 @@ window.updateModel = function (modelKey) {
 
 /**
  * Main function to fetch and stream response from the API
- * @param {string} userMessage - The user's message
- * @param {AbortSignal} signal - Abort signal for stopping the request
- * @param {function} uiUpdateCallback - Callback to update UI with chunks
+ * Supports both normal content and Qwen 3.5 reasoning_content tokens
  */
 async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
     const normalizedMessage = String(userMessage || '').trim();
     if (!normalizedMessage) {
-        uiUpdateCallback('[System Error]: Empty message cannot be sent.', true);
+        uiUpdateCallback('[System Error]: Empty message cannot be sent.', true, false);
         return;
     }
     conversationHistory.push({ role: "user", content: normalizedMessage });
@@ -114,13 +109,15 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
 
     const config = modelConfigs[currentModel] || modelConfigs['pro'];
     const apiBase = resolveApiBase();
-    let aiFullResponse = "";
+    let aiContent = "";
+    let aiReasoning = "";
 
     try {
         const response = await fetch(`${apiBase}/v1/chat/completions`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Accept': 'text/event-stream'
             },
             body: JSON.stringify({
                 messages: buildRequestMessages(conversationHistory),
@@ -135,8 +132,8 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
             let serverMessage = `Server error: ${response.status}`;
             try {
                 const errorData = await response.json();
-                serverMessage = errorData.error || serverMessage;
-            } catch (jsonError) {
+                serverMessage = errorData.error?.message || errorData.error || serverMessage;
+            } catch (_) {
                 const fallbackText = await response.text();
                 if (fallbackText) serverMessage = fallbackText;
             }
@@ -148,69 +145,92 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
         }
 
         const reader = response.body.getReader();
-        const decoder = new TextDecoder();
+        const decoder = new TextDecoder('utf-8');
         let buffer = "";
 
         while (true) {
             const { done, value } = await reader.read();
-
-            if (done) {
-                break;
-            }
+            if (done) break;
 
             buffer += decoder.decode(value, { stream: true });
-
-            // Split by SSE data chunks
             const lines = buffer.split('\n');
             buffer = lines.pop() || "";
 
             for (const line of lines) {
                 const trimmedLine = line.trim();
+                if (!trimmedLine || trimmedLine === 'data: [DONE]') continue;
 
-                // Skip empty lines and SSE control messages
-                if (!trimmedLine || trimmedLine === 'data: [DONE]') {
-                    continue;
-                }
-
-                // Parse SSE data
-                if (trimmedLine.startsWith('data: ')) {
+                if (trimmedLine.startsWith('data:')) {
                     try {
-                        const jsonStr = trimmedLine.slice(6);
+                        const jsonStr = trimmedLine.replace(/^data:\s*/, '');
                         const data = JSON.parse(jsonStr);
 
-                        if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content) {
-                            const chunk = data.choices[0].delta.content;
-                            aiFullResponse += chunk;
-                            uiUpdateCallback(chunk, false);
+                        if (data.choices && data.choices[0] && data.choices[0].delta) {
+                            const delta = data.choices[0].delta;
+
+                            // Handle Qwen 3.5 reasoning tokens
+                            if (delta.reasoning_content) {
+                                aiReasoning += delta.reasoning_content;
+                                uiUpdateCallback(delta.reasoning_content, false, true);
+                            }
+
+                            // Handle standard message content
+                            if (delta.content) {
+                                aiContent += delta.content;
+                                uiUpdateCallback(delta.content, false, false);
+                            }
                         }
                     } catch (e) {
-                        // Skip malformed JSON
-                        console.warn('Failed to parse SSE chunk:', e);
+                        console.warn('Failed to parse SSE chunk:', trimmedLine, e);
                     }
                 }
             }
         }
 
-        conversationHistory.push({ role: "assistant", content: aiFullResponse });
+        // Combine reasoning and content for conversation history
+        let fullRecord = aiContent;
+        if (aiReasoning) {
+            fullRecord = `<think>${aiReasoning}</think>\n\n` + aiContent;
+        }
+
+        conversationHistory.push({ role: "assistant", content: fullRecord });
         saveConversationHistory();
-        saveMemoryEntry(normalizedMessage, aiFullResponse);
-        uiUpdateCallback("", true);
+        saveMemoryEntry(normalizedMessage, fullRecord);
+        uiUpdateCallback("", true, false);
 
     } catch (error) {
         if (error.name === 'AbortError') {
             console.log("Generation stopped by user.");
-            uiUpdateCallback("", true);
+            if (aiContent || aiReasoning) {
+                let partial = aiContent;
+                if (aiReasoning) partial = `<think>${aiReasoning}</think>\n\n` + aiContent;
+                conversationHistory.push({ role: "assistant", content: partial });
+                saveConversationHistory();
+            }
+            uiUpdateCallback("", true, false);
         } else {
             console.error("Fetch Error:", error);
-            uiUpdateCallback(`[System Error]: Is the Python server running? ${error.message}`, true);
+            uiUpdateCallback(`[System Error]: Unable to connect to local AI server at ${apiBase}.\n\nEnsure start.bat or python server.py is running.`, true, false);
         }
     }
 }
 
-// Export for use in other scripts
+// Server health check helper
+async function checkServerHealth() {
+    try {
+        const apiBase = resolveApiBase();
+        const res = await fetch(`${apiBase}/health`, { signal: AbortSignal.timeout(2000) });
+        return res.ok;
+    } catch {
+        return false;
+    }
+}
+
+// Global exports
 window.fetchAndStreamResponse = fetchAndStreamResponse;
 window.getConversationHistory = function () { return conversationHistory; };
 window.getApiBase = resolveApiBase;
+window.checkServerHealth = checkServerHealth;
 window.clearConversationHistory = function () {
     if (saveTimeout) clearTimeout(saveTimeout);
     conversationHistory = [];
