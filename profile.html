@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 
 <head>
@@ -6,8 +6,22 @@
   <meta name="viewport"
     content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content" />
   <title>Account - SparkV2</title>
-  <link rel="stylesheet" href="css/style.css" />
-  <link rel="stylesheet" href="css/profile.css" />
+  <base href="/">
+    <style>
+        #app-loader{position:fixed;top:0;left:0;width:100vw;height:100vh;background-color:#09090b;z-index:999999;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#fafafa;transition:opacity .4s ease,visibility .4s ease}
+        #app-loader.fade-out{opacity:0;visibility:hidden;pointer-events:none}
+        .loader-icon-box{width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,#6366f1,#ec4899);display:flex;align-items:center;justify-content:center;margin-bottom:18px;box-shadow:0 0 25px rgba(99,102,241,.45)}
+        .loader-app-title{font-size:1.3rem;font-weight:700;margin-bottom:6px}
+        .loader-app-sub{font-size:.85rem;color:#a1a1aa;margin-bottom:22px}
+        .loader-bar-bg{width:160px;height:3px;background:rgba(255,255,255,.1);border-radius:99px;overflow:hidden;position:relative}
+        .loader-bar-fill{width:45%;height:100%;background:linear-gradient(90deg,#6366f1,#a855f7);border-radius:99px;position:absolute;animation:loader-slide 1.4s infinite ease-in-out}
+        @keyframes loader-slide{0%{left:-45%}100%{left:100%}}
+    </style>
+    <script>
+        (function(){function r(){var l=document.getElementById('app-loader');if(l&&!l.classList.contains('fade-out')){l.classList.add('fade-out');setTimeout(function(){if(l&&l.parentNode)l.parentNode.removeChild(l);},450);}}window.addEventListener('load',function(){setTimeout(r,250);});setTimeout(r,2500);})();
+    </script>
+    <link rel="stylesheet" href="/css/style.css?v=3" />
+    <link rel="stylesheet" href="/css/profile.css?v=3" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -15,6 +29,12 @@
 </head>
 
 <body data-theme="dark">
+  <div id="app-loader">
+    <div class="loader-icon-box"><svg width="26" height="26" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg"><path d="M150 10 L60 140 H120 L100 246 L196 116 H136 Z" fill="white" /></svg></div>
+    <div class="loader-app-title">SparkV2 AI</div>
+    <div class="loader-app-sub">Loading profile...</div>
+    <div class="loader-bar-bg"><div class="loader-bar-fill"></div></div>
+  </div>
   <div class="app-container">
     <div id="mobile-overlay" class="overlay hidden"></div>
 

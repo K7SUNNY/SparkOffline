@@ -44,13 +44,13 @@ def wait_for_server(url, timeout=25):
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
-            req = Request(f"{url}/css/style.css", headers={"User-Agent": "SparkV2-Launcher"})
+            req = Request(f"{url}/css/style.css?v=2", headers={"User-Agent": "SparkV2-Launcher"})
             with urlopen(req, timeout=1.5) as resp:
                 if resp.status == 200:
                     return True
         except Exception:
             pass
-        time.sleep(0.5)
+        time.sleep(0.6)
     return False
 
 def main():
@@ -73,7 +73,7 @@ def main():
         sys.exit(1)
     
     model_name = os.path.basename(model_path)
-    print(f"[INFO] Model: {model_name}")
+    print(f"[INFO] Model:  {model_name}")
 
     # 2. Locate Inference Engine
     server_exe, engine_desc = find_server_binary(base_dir)
@@ -83,8 +83,8 @@ def main():
         sys.exit(1)
 
     print(f"[INFO] Engine: {engine_desc}")
-    print(f"[INFO] Serving Web App & API at: http://{host}:{port}")
-    print(f"[INFO] Context Window: {ctx_size} tokens")
+    print(f"[INFO] URL:    http://{host}:{port}")
+    print(f"[INFO] Window: {ctx_size} context tokens")
     print("=" * 60)
 
     # Command line args for llama-server
@@ -104,19 +104,26 @@ def main():
     try:
         process = subprocess.Popen(cmd, cwd=base_dir)
         server_url = f"http://{host}:{port}"
-        print(f"\n[INFO] Loading Qwen 3.5 model into memory (usually takes 3-6s)...")
         
-        # Wait until the model is ready and CSS returns HTTP 200
+        print(f"\n[INFO] Warming up model into GPU/RAM...")
+        # Countdown timer giving the engine time to initialize
+        for i in range(5, 0, -1):
+            print(f"       Waiting for engine initialization... {i}s ", end="\r", flush=True)
+            time.sleep(1)
+        print("\n       Verifying engine & CSS readiness...")
+
+        # Poll until CSS returns HTTP 200
         if wait_for_server(server_url, timeout=20):
-            print(f"[INFO] Model loaded successfully! Opening {server_url}/index.html\n")
+            print(f"[INFO] Engine & CSS confirmed ready! Opening {server_url}/index.html\n")
+            time.sleep(0.8)
             webbrowser.open(f"{server_url}/index.html")
         else:
-            print(f"[WARN] Startup check took longer than expected. Opening browser...")
+            print(f"[WARN] Startup check timed out, opening browser anyway...")
             webbrowser.open(f"{server_url}/index.html")
 
         print("=" * 60)
         print("Server is active! Keep this window open while using the chat app.")
-        print("Press Ctrl+C to stop the server.")
+        print("Press Ctrl+C in this terminal to stop the server.")
         print("=" * 60 + "\n")
         process.wait()
 

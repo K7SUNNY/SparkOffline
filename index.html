@@ -7,13 +7,113 @@
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>SparkV2 - Local AI Chat (Qwen 3.5)</title>
-    <link rel="stylesheet" href="/css/style.css?v=2">
+
+    <!-- Instant Static Loading Screen (Inlined so it displays frame 0 without FOUC) -->
+    <style>
+        #app-loader {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background-color: #09090b;
+            z-index: 999999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            color: #fafafa;
+            transition: opacity 0.4s ease, visibility 0.4s ease;
+        }
+        #app-loader.fade-out {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+        .loader-icon-box {
+            width: 54px;
+            height: 54px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 18px;
+            box-shadow: 0 0 25px rgba(99, 102, 241, 0.45);
+            animation: loader-glow 2s infinite ease-in-out;
+        }
+        .loader-app-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 6px;
+            letter-spacing: -0.02em;
+        }
+        .loader-app-sub {
+            font-size: 0.85rem;
+            color: #a1a1aa;
+            margin-bottom: 22px;
+        }
+        .loader-bar-bg {
+            width: 160px;
+            height: 3px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 99px;
+            overflow: hidden;
+            position: relative;
+        }
+        .loader-bar-fill {
+            width: 45%;
+            height: 100%;
+            background: linear-gradient(90deg, #6366f1, #a855f7);
+            border-radius: 99px;
+            position: absolute;
+            animation: loader-slide 1.4s infinite ease-in-out;
+        }
+        @keyframes loader-slide {
+            0% { left: -45%; }
+            100% { left: 100%; }
+        }
+        @keyframes loader-glow {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 20px rgba(99, 102, 241, 0.4); }
+            50% { transform: scale(1.04); box-shadow: 0 0 35px rgba(168, 85, 247, 0.6); }
+        }
+    </style>
+
+    <script>
+        (function() {
+            function removeLoader() {
+                var l = document.getElementById('app-loader');
+                if (l && !l.classList.contains('fade-out')) {
+                    l.classList.add('fade-out');
+                    setTimeout(function() { if (l && l.parentNode) l.parentNode.removeChild(l); }, 450);
+                }
+            }
+            window.addEventListener('load', function() {
+                setTimeout(removeLoader, 300);
+            });
+            setTimeout(removeLoader, 2500);
+        })();
+    </script>
+
+    <link rel="stylesheet" href="/css/style.css?v=3">
     <link rel="icon" href="/assets/favicon.ico">
     <script src="/js/marked.min.js?v=2" defer></script>
     <script src="/js/highlight.min.js?v=2" defer></script>
 </head>
 
 <body data-theme="dark">
+
+    <!-- Instant Static Loading Screen -->
+    <div id="app-loader">
+        <div class="loader-icon-box">
+            <svg width="26" height="26" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+                <path d="M150 10 L60 140 H120 L100 246 L196 116 H136 Z" fill="white" />
+            </svg>
+        </div>
+        <div class="loader-app-title">SparkV2 AI</div>
+        <div class="loader-app-sub">Warming up local Qwen 3.5 model...</div>
+        <div class="loader-bar-bg">
+            <div class="loader-bar-fill"></div>
+        </div>
+    </div>
 
     <div class="app-container">
 
