@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 SparkV2 / SparkOffline Local AI Backend Server
 Powered by standalone llama.cpp inference engine with Vulkan GPU acceleration.
@@ -15,17 +15,11 @@ import webbrowser
 from urllib.request import urlopen, Request
 from urllib.error import URLError
 
-def find_model_file(models_dir):
-    """Finds Qwen or any valid .gguf model in models/ directory."""
-    preferred = os.path.join(models_dir, "Qwen3.5-2B-Q4_K_M.gguf")
-    if os.path.isfile(preferred):
-        return preferred
-    
-    gguf_files = glob.glob(os.path.join(models_dir, "*.gguf"))
-    if gguf_files:
-        return gguf_files[0]
-    
-    return None
+def get_available_models(models_dir):
+    """Returns all valid .gguf model files in models/ directory."""
+    if not os.path.isdir(models_dir):
+        return []
+    return sorted(glob.glob(os.path.join(models_dir, "*.gguf")))
 
 def find_server_binary(base_dir):
     """Detects Vulkan GPU accelerated server, falls back to CPU."""
@@ -39,18 +33,32 @@ def find_server_binary(base_dir):
     
     return None, None
 
-def wait_for_server(url, timeout=25):
-    """Polls server until the model is loaded and static files (CSS) return HTTP 200."""
+def wait_for_server(process, url, timeout=20):
+    """Polls server until process is ready or exits prematurely."""
     start_time = time.time()
     while time.time() - start_time < timeout:
+        # Check if process terminated prematurely
+        exit_code = process.poll()
+        if exit_code is not None:
+            print(f"\n[ERROR] Inference engine exited unexpectedly with code {exit_code}!")
+            return False
+
         try:
-            req = Request(f"{url}/css/style.css?v=2", headers={"User-Agent": "SparkV2-Launcher"})
-            with urlopen(req, timeout=1.5) as resp:
-                if resp.status == 200:
+            req = Request(f"{url}/health", headers={"User-Agent": "SparkV2-Launcher"})
+            with urlopen(req, timeout=1.0) as resp:
+                if resp.status in (200, 503):
+                    # 200 = ready, 503 = router loaded / model loading
                     return True
         except Exception:
-            pass
-        time.sleep(0.6)
+            try:
+                # Fallback to static asset check
+                req_css = Request(f"{url}/css/style.css", headers={"User-Agent": "SparkV2-Launcher"})
+                with urlopen(req_css, timeout=1.0) as resp:
+                    if resp.status == 200:
+                        return True
+            except Exception:
+                pass
+        time.sleep(0.5)
     return False
 
 def main():
@@ -65,15 +73,16 @@ def main():
     print("        SparkV2 Offline - Local AI Server")
     print("=" * 60)
 
-    # 1. Locate Model
-    model_path = find_model_file(models_dir)
-    if not model_path:
-        print(f"\n[ERROR] No .gguf model found in '{models_dir}'!")
-        print("Please ensure 'Qwen3.5-2B-Q4_K_M.gguf' is located in the models/ folder.")
+    # 1. Locate Models in models/
+    models = get_available_models(models_dir)
+    if not models:
+        print(f"\n[ERROR] No .gguf models found in '{models_dir}'!")
+        print("Please place at least one .gguf model (e.g. Qwen3.5-2B-Q4_K_M.gguf) in models/.")
         sys.exit(1)
     
-    model_name = os.path.basename(model_path)
-    print(f"[INFO] Model:  {model_name}")
+    print(f"[INFO] Detected {len(models)} model(s) in models/:")
+    for m in models:
+        print(f"       - {os.path.basename(m)} ({os.path.getsize(m) / (1024*1024):.1f} MB)")
 
     # 2. Locate Inference Engine
     server_exe, engine_desc = find_server_binary(base_dir)
@@ -87,10 +96,11 @@ def main():
     print(f"[INFO] Window: {ctx_size} context tokens")
     print("=" * 60)
 
-    # Command line args for llama-server
+    # Launch in router mode with --models-dir to support all models dynamically
     cmd = [
         server_exe,
-        "-m", model_path,
+        "--models-dir", models_dir,
+        "--models-max", "1",
         "--path", base_dir,
         "--port", str(port),
         "--host", host,
@@ -98,28 +108,25 @@ def main():
     ]
 
     if "--test" in sys.argv:
-        print("[TEST] Verified model path and binary. Ready to run.")
+        print("[TEST] Verified model directory and engine binary. Ready to run.")
         sys.exit(0)
 
     try:
         process = subprocess.Popen(cmd, cwd=base_dir)
         server_url = f"http://{host}:{port}"
         
-        print(f"\n[INFO] Warming up model into GPU/RAM...")
-        # Countdown timer giving the engine time to initialize
-        for i in range(5, 0, -1):
-            print(f"       Waiting for engine initialization... {i}s ", end="\r", flush=True)
-            time.sleep(1)
-        print("\n       Verifying engine & CSS readiness...")
-
-        # Poll until CSS returns HTTP 200
-        if wait_for_server(server_url, timeout=20):
-            print(f"[INFO] Engine & CSS confirmed ready! Opening {server_url}/index.html\n")
-            time.sleep(0.8)
+        print("\n[INFO] Starting inference server and verifying readiness...")
+        if wait_for_server(process, server_url, timeout=20):
+            print(f"[INFO] Engine & Web UI confirmed ready! Opening {server_url}/index.html\n")
+            time.sleep(0.5)
             webbrowser.open(f"{server_url}/index.html")
         else:
-            print(f"[WARN] Startup check timed out, opening browser anyway...")
-            webbrowser.open(f"{server_url}/index.html")
+            if process.poll() is None:
+                print(f"[WARN] Startup check timed out, attempting to open browser anyway...")
+                webbrowser.open(f"{server_url}/index.html")
+            else:
+                print(f"[ERROR] Could not start server. Please check port availability or permissions.")
+                sys.exit(1)
 
         print("=" * 60)
         print("Server is active! Keep this window open while using the chat app.")

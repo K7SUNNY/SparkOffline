@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 
 <head>
@@ -58,7 +58,7 @@
 
       <div class="new-chat-wrapper">
         <button class="new-chat-btn"
-          onclick="localStorage.setItem('spark_chat_history', '[]'); window.location.href='index.html';"
+          onclick="localStorage.removeItem('spark_active_session_id'); window.location.href='index.html';"
           title="New Chat">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -191,7 +191,8 @@
     </nav>
   </div>
 
-  <script src="js/script.js" defer></script>
+  <script src="js/offline-api.js?v=6"></script>
+  <script src="js/script.js?v=6" defer></script>
 </body>
 
 </html>

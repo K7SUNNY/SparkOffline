@@ -1,4 +1,4 @@
-﻿const STORAGE_KEYS = {
+const UI_STORAGE_KEYS = {
     theme: 'spark_theme',
     model: 'spark_default_model',
     memory: 'spark_memory'
@@ -23,7 +23,7 @@ function escapeHtml(value) {
 }
 
 function getThemeSelection() {
-    const saved = localStorage.getItem(STORAGE_KEYS.theme);
+    const saved = localStorage.getItem(UI_STORAGE_KEYS.theme);
     if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
     return 'dark';
 }
@@ -38,7 +38,7 @@ function applyThemeSelection(selection) {
         ? selection
         : 'dark';
 
-    localStorage.setItem(STORAGE_KEYS.theme, normalized);
+    localStorage.setItem(UI_STORAGE_KEYS.theme, normalized);
 
     const resolved = resolveTheme(normalized);
     if (document.body) {
@@ -47,51 +47,56 @@ function applyThemeSelection(selection) {
 }
 
 // Marked.js Configuration with Code Highlighting & Copy Button
-const renderer = new marked.Renderer();
-renderer.code = function (tokenOrCode, lang) {
-    let code;
-    let language;
+if (typeof marked !== 'undefined') {
+    const renderer = new marked.Renderer();
+    renderer.code = function (tokenOrCode, lang) {
+        let code;
+        let language;
 
-    if (typeof tokenOrCode === 'object' && tokenOrCode !== null) {
-        code = tokenOrCode.text || '';
-        language = tokenOrCode.lang || 'text';
-    } else {
-        code = tokenOrCode;
-        language = lang || 'text';
-    }
-
-    code = String(code);
-    const normalizedLanguage = String(language || 'text')
-        .toLowerCase()
-        .replace(/[^a-z0-9_+-]/g, '') || 'text';
-    const displayLanguage = escapeHtml(normalizedLanguage);
-
-    let highlightedCode = escapeHtml(code);
-    if (window.hljs) {
-        const validLang = hljs.getLanguage(normalizedLanguage) ? normalizedLanguage : 'plaintext';
-        try {
-            highlightedCode = hljs.highlight(code, { language: validLang }).value;
-        } catch (error) {
-            console.error('Highlight error:', error);
-            highlightedCode = escapeHtml(code);
+        if (typeof tokenOrCode === 'object' && tokenOrCode !== null) {
+            code = tokenOrCode.text || '';
+            language = tokenOrCode.lang || 'text';
+        } else {
+            code = tokenOrCode;
+            language = lang || 'text';
         }
-    }
 
-    return `
-    <div class="code-wrapper">
-        <div class="code-header">
-            <span>${displayLanguage}</span>
-            <button class="copy-btn" aria-label="Copy code block">Copy</button>
+        code = String(code);
+        const normalizedLanguage = String(language || 'text')
+            .toLowerCase()
+            .replace(/[^a-z0-9_+-]/g, '') || 'text';
+        const displayLanguage = escapeHtml(normalizedLanguage);
+
+        let highlightedCode = escapeHtml(code);
+        if (window.hljs) {
+            const validLang = hljs.getLanguage(normalizedLanguage) ? normalizedLanguage : 'plaintext';
+            try {
+                highlightedCode = hljs.highlight(code, { language: validLang }).value;
+            } catch (error) {
+                console.error('Highlight error:', error);
+                highlightedCode = escapeHtml(code);
+            }
+        }
+
+        return `
+        <div class="code-wrapper">
+            <div class="code-header">
+                <span>${displayLanguage}</span>
+                <button class="copy-btn" aria-label="Copy code block">Copy</button>
+            </div>
+            <pre><code class="hljs language-${displayLanguage}">${highlightedCode}</code></pre>
         </div>
-        <pre><code class="hljs language-${displayLanguage}">${highlightedCode}</code></pre>
-    </div>
-    `;
-};
+        `;
+    };
 
-marked.use({ renderer, breaks: true, gfm: true });
+    marked.use({ renderer, breaks: true, gfm: true });
+}
 
 function renderMarkdownSafe(rawText) {
     if (!rawText) return '';
+    if (typeof marked === 'undefined') {
+        return escapeHtml(rawText);
+    }
     let text = String(rawText);
 
     // Format completed <think>...</think> reasoning blocks
@@ -178,8 +183,9 @@ function initSidebar() {
         toggleSidebar();
     });
 
-    sidebarHeader?.addEventListener('click', () => {
-        if (window.innerWidth > 768 && sidebar.classList.contains('collapsed')) {
+    sidebarHeader?.addEventListener('click', (e) => {
+        if (window.innerWidth > 768) {
+            if (e.target.closest('#sidebar-toggle-btn')) return;
             toggleSidebar();
         }
     });
@@ -214,20 +220,19 @@ function initChatPage() {
     const modelBtn = document.getElementById('model-btn');
     const modelMenu = document.getElementById('model-menu');
     const currentModelText = document.getElementById('current-model');
-    const modelOptions = Array.from(document.querySelectorAll('.model-option'));
     const welcomeScreen = document.getElementById('welcome-screen');
     const mobileNav = document.querySelector('.mobile-bottom-nav');
     const newChatBtn = document.querySelector('.new-chat-btn');
 
+    // Pre-populate model pill immediately from cache if available
+    const cachedModel = localStorage.getItem('spark_selected_model') || (typeof window.getSelectedModel === 'function' ? window.getSelectedModel() : '');
+    if (cachedModel && currentModelText) {
+        currentModelText.textContent = cachedModel.replace(/\.gguf$/i, '');
+    }
+
     let isGenerating = false;
     let abortController = null;
     let firstChunkReceived = false;
-
-    const modelLabelByValue = {
-        pro: 'Qwen 3.5 Pro',
-        fast: 'Qwen 3.5 Fast',
-        coding: 'Qwen 3.5 Coding'
-    };
 
     const aiIcon = `
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
@@ -323,32 +328,168 @@ function initChatPage() {
         }
     }
 
-    function setSelectedModel(modelValue) {
-        const option = modelOptions.find((item) => item.dataset.value === modelValue);
-        const resolved = option?.dataset.value || 'pro';
-
-        modelOptions.forEach((item) => item.classList.remove('selected'));
-        if (option) option.classList.add('selected');
-
-        currentModelText.textContent = modelLabelByValue[resolved] || modelLabelByValue.pro;
-        localStorage.setItem(STORAGE_KEYS.model, resolved);
-
-        if (typeof window.updateModel === 'function') {
-            window.updateModel(resolved);
+    function setSelectedModel(modelId) {
+        if (!modelId) return;
+        const cleanName = modelId.replace(/\.gguf$/i, '');
+        currentModelText.textContent = cleanName;
+        localStorage.setItem('spark_selected_model', modelId);
+        if (typeof window.setSelectedModel === 'function') {
+            window.setSelectedModel(modelId);
         }
+        const allOptions = Array.from(modelMenu?.querySelectorAll('.model-option') || []);
+        allOptions.forEach((opt) => {
+            if (opt.dataset.value === modelId) {
+                opt.classList.add('selected');
+            } else {
+                opt.classList.remove('selected');
+            }
+        });
+    }
+
+    async function loadDynamicModels() {
+        if (typeof window.fetchAvailableModels !== 'function' || !modelMenu) return;
+        const models = await window.fetchAvailableModels();
+        if (!models || models.length === 0) {
+            modelMenu.innerHTML = `
+                <div class="model-option" style="cursor: default; opacity: 0.7;">
+                    <span class="model-name">No models found in models/</span>
+                </div>
+            `;
+            if (currentModelText && (!currentModelText.textContent || currentModelText.textContent === 'Loading model...')) {
+                currentModelText.textContent = 'Server Offline';
+            }
+            return;
+        }
+
+        modelMenu.innerHTML = '';
+        const saved = localStorage.getItem('spark_selected_model') || (typeof window.getSelectedModel === 'function' ? window.getSelectedModel() : '');
+        const activeModel = (saved && models.includes(saved)) ? saved : models[0];
+
+        models.forEach((modelId) => {
+            const cleanName = modelId.replace(/\.gguf$/i, '');
+            const opt = document.createElement('div');
+            opt.className = 'model-option' + (modelId === activeModel ? ' selected' : '');
+            opt.dataset.value = modelId;
+
+            opt.innerHTML = `
+                <span class="model-name">${escapeHtml(cleanName)}</span>
+                <span class="model-desc">${escapeHtml(cleanName)}.gguf</span>
+            `;
+
+            opt.addEventListener('click', () => {
+                setSelectedModel(modelId);
+                modelMenu.classList.add('hidden');
+            });
+
+            modelMenu.appendChild(opt);
+        });
+
+        setSelectedModel(activeModel);
+    }
+
+    function renderSidebarHistory() {
+        const container = document.getElementById('sidebar-history-list') || document.querySelector('.history-list');
+        if (!container) return;
+
+        const sessions = typeof window.getChatSessions === 'function' ? window.getChatSessions() : [];
+        const activeId = typeof window.getActiveSessionId === 'function' ? window.getActiveSessionId() : null;
+
+        container.innerHTML = '';
+
+        if (sessions.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'history-empty';
+            empty.textContent = 'No recent chats';
+            container.appendChild(empty);
+            return;
+        }
+
+        sessions.forEach((session) => {
+            const item = document.createElement('div');
+            item.className = 'history-item' + (session.id === activeId ? ' active' : '');
+            item.dataset.id = session.id;
+
+            const title = document.createElement('span');
+            title.className = 'history-item-title';
+            title.textContent = session.title || 'New Conversation';
+            title.title = session.title || 'New Conversation';
+
+            const delBtn = document.createElement('button');
+            delBtn.className = 'delete-chat-btn';
+            delBtn.title = 'Delete chat';
+            delBtn.setAttribute('aria-label', 'Delete chat');
+            delBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            `;
+
+            delBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (typeof window.deleteChatSession === 'function') {
+                    window.deleteChatSession(session.id);
+                }
+                if (session.id === activeId) {
+                    hydrateChatHistory();
+                }
+                renderSidebarHistory();
+            });
+
+            item.addEventListener('click', () => {
+                if (typeof window.setActiveSessionId === 'function') {
+                    window.setActiveSessionId(session.id);
+                }
+                if (!document.getElementById('chat-area')) {
+                    window.location.href = 'index.html';
+                    return;
+                }
+                hydrateChatHistory();
+                renderSidebarHistory();
+                const sidebar = document.getElementById('sidebar');
+                const overlay = document.getElementById('mobile-overlay');
+                if (window.innerWidth <= 768 && sidebar) {
+                    sidebar.classList.remove('open');
+                    overlay?.classList.add('hidden');
+                }
+            });
+
+            item.appendChild(title);
+            item.appendChild(delBtn);
+            container.appendChild(item);
+        });
     }
 
     function hydrateChatHistory() {
         if (typeof window.getConversationHistory !== 'function') return;
         const history = window.getConversationHistory();
-        if (!Array.isArray(history) || history.length === 0) return;
+
+        chatArea.innerHTML = '';
+
+        if (!Array.isArray(history) || history.length === 0) {
+            chatArea.innerHTML = `
+                <div id="welcome-screen" class="welcome-screen">
+                    <h2>Hey, I'm Spark</h2>
+                    <p>Powered by <strong>Qwen 3.5</strong> on your device with hardware acceleration. Ask me anything...</p>
+                </div>
+            `;
+            return;
+        }
 
         const visibleMessages = history.filter(
             (message) => message && typeof message === 'object' && message.role !== 'system'
         );
-        if (visibleMessages.length === 0) return;
+        if (visibleMessages.length === 0) {
+            chatArea.innerHTML = `
+                <div id="welcome-screen" class="welcome-screen">
+                    <h2>Hey, I'm Spark</h2>
+                    <p>Powered by <strong>Qwen 3.5</strong> on your device with hardware acceleration. Ask me anything...</p>
+                </div>
+            `;
+            return;
+        }
 
-        hideWelcomeIfNeeded();
         visibleMessages.forEach((message) => {
             if (message.role === 'assistant') {
                 appendMessage(message.content || '', 'ai');
@@ -356,6 +497,7 @@ function initChatPage() {
                 appendMessage(message.content || '', 'user');
             }
         });
+        scrollToBottom();
     }
 
     // New Chat Action: resets conversation cleanly without page reload flash
@@ -364,18 +506,21 @@ function initChatPage() {
         if (isGenerating && abortController) {
             abortController.abort();
         }
-        if (typeof window.clearConversationHistory === 'function') {
-            window.clearConversationHistory();
+        if (typeof window.setActiveSessionId === 'function') {
+            window.setActiveSessionId(null);
         }
-        chatArea.innerHTML = `
-            <div id="welcome-screen" class="welcome-screen">
-                <h2>Hey, I'm Spark</h2>
-                <p>Powered by Qwen 3.5 local model. Ask me anything...</p>
-            </div>
-        `;
+        hydrateChatHistory();
+        renderSidebarHistory();
         setGeneratingState(false);
         chatInput.value = '';
         chatInput.focus();
+
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('mobile-overlay');
+        if (window.innerWidth <= 768 && sidebar) {
+            sidebar.classList.remove('open');
+            overlay?.classList.add('hidden');
+        }
     });
 
     function handleFormSubmit() {
@@ -405,7 +550,15 @@ function initChatPage() {
         window.aiBubble = null;
         firstChunkReceived = false;
 
-        fetchAndStreamResponse(message, abortController.signal, (chunk, isDone, isReasoning) => {
+        const streamFn = window.fetchAndStreamResponse || (typeof fetchAndStreamResponse === 'function' ? fetchAndStreamResponse : null);
+        if (!streamFn) {
+            removeTypingIndicator(loadingId);
+            appendMessage('[System Error]: API streaming client not loaded.', 'ai');
+            setGeneratingState(false);
+            return;
+        }
+
+        streamFn(message, abortController.signal, (chunk, isDone, isReasoning) => {
             if (chunk && chunk.startsWith('[System Error]')) {
                 removeTypingIndicator(loadingId);
                 const errorBubble = appendMessage(chunk, 'ai');
@@ -425,6 +578,7 @@ function initChatPage() {
                     errorBubble.appendChild(retryBtn);
                 }
                 setGeneratingState(false);
+                renderSidebarHistory();
                 return;
             }
 
@@ -456,6 +610,7 @@ function initChatPage() {
                 }
                 setGeneratingState(false);
                 abortController = null;
+                renderSidebarHistory();
             }
         });
     }
@@ -463,14 +618,6 @@ function initChatPage() {
     modelBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
         modelMenu?.classList.toggle('hidden');
-    });
-
-    modelOptions.forEach((option) => {
-        option.addEventListener('click', () => {
-            const modelValue = option.dataset.value || 'pro';
-            setSelectedModel(modelValue);
-            modelMenu?.classList.add('hidden');
-        });
     });
 
     document.addEventListener('click', (e) => {
@@ -525,13 +672,17 @@ function initChatPage() {
         handleFormSubmit();
     });
 
-    const initialModel = localStorage.getItem(STORAGE_KEYS.model) || 'pro';
-    setSelectedModel(initialModel);
     hydrateChatHistory();
+    renderSidebarHistory();
+    loadDynamicModels();
+
+    if (typeof window.onSessionChange === 'function') {
+        window.onSessionChange(renderSidebarHistory);
+    }
 
     // Check server status indicator
     updateServerStatusIndicator();
-    setInterval(updateServerStatusIndicator, 8000);
+    setInterval(updateServerStatusIndicator, 4000);
 }
 
 async function updateServerStatusIndicator() {
@@ -539,14 +690,21 @@ async function updateServerStatusIndicator() {
     const label = document.getElementById('server-status-label');
     if (!indicator) return;
 
-    const isAlive = await window.checkServerHealth?.();
+    const isAlive = typeof window.checkServerHealth === 'function'
+        ? await window.checkServerHealth()
+        : false;
+
     if (isAlive) {
         indicator.style.backgroundColor = '#10b981';
-        indicator.title = 'Model Server: Online';
+        indicator.title = 'Inference Server: Online';
         if (label) label.textContent = 'Qwen Online';
+        const modelMenu = document.getElementById('model-menu');
+        if (modelMenu && (!modelMenu.children.length || modelMenu.querySelector('.model-option[style]'))) {
+            loadDynamicModels();
+        }
     } else {
         indicator.style.backgroundColor = '#ef4444';
-        indicator.title = 'Model Server: Offline';
+        indicator.title = 'Inference Server: Offline';
         if (label) label.textContent = 'Offline';
     }
 }
@@ -559,13 +717,13 @@ function initMemoryPage() {
     const clearButton = document.getElementById('clear-memory-btn');
 
     function loadMemory() {
-        const raw = localStorage.getItem(STORAGE_KEYS.memory);
+        const raw = localStorage.getItem(UI_STORAGE_KEYS.memory);
         const parsed = safeParseJSON(raw || '[]', []);
         return Array.isArray(parsed) ? parsed : [];
     }
 
     function saveMemory(items) {
-        localStorage.setItem(STORAGE_KEYS.memory, JSON.stringify(items));
+        localStorage.setItem(UI_STORAGE_KEYS.memory, JSON.stringify(items));
     }
 
     let memoryItems = loadMemory();
@@ -672,11 +830,9 @@ function initSettingsPage() {
             return;
         }
 
-        if (value === 'pro' || value === 'fast' || value === 'coding') {
-            localStorage.setItem(STORAGE_KEYS.model, value);
-            if (typeof window.updateModel === 'function') {
-                window.updateModel(value);
-            }
+        localStorage.setItem('spark_selected_model', value);
+        if (typeof window.setSelectedModel === 'function') {
+            window.setSelectedModel(value);
         }
     }
 
@@ -705,11 +861,37 @@ function initSettingsPage() {
         if (container.querySelector('.custom-option[data-value="dark"]')) {
             setSelectValue(container, getThemeSelection());
         }
-
-        if (container.querySelector('.custom-option[data-value="pro"]')) {
-            setSelectValue(container, localStorage.getItem(STORAGE_KEYS.model) || 'pro');
-        }
     });
+
+    const modelContainer = document.getElementById('settings-model-container');
+    if (modelContainer && typeof window.fetchAvailableModels === 'function') {
+        window.fetchAvailableModels().then((models) => {
+            if (!models || models.length === 0) return;
+            const optionsContainer = modelContainer.querySelector('.custom-options');
+            if (!optionsContainer) return;
+            optionsContainer.innerHTML = '';
+
+            const currentModel = localStorage.getItem('spark_selected_model') || models[0];
+
+            models.forEach((modelId) => {
+                const cleanName = modelId.replace(/\.gguf$/i, '');
+                const opt = document.createElement('div');
+                opt.className = 'custom-option' + (modelId === currentModel ? ' selected' : '');
+                opt.dataset.value = modelId;
+                opt.textContent = cleanName;
+
+                opt.addEventListener('click', () => {
+                    setSelectValue(modelContainer, modelId);
+                    modelContainer.classList.remove('open');
+                    handleSelectChange(modelId);
+                });
+
+                optionsContainer.appendChild(opt);
+            });
+
+            setSelectValue(modelContainer, currentModel);
+        });
+    }
 
     document.addEventListener('click', () => {
         selectContainers.forEach((container) => container.classList.remove('open'));

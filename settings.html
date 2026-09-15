@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -61,7 +61,7 @@
 
             <div class="new-chat-wrapper">
                 <button class="new-chat-btn" aria-label="New chat" title="New Chat"
-                    onclick="localStorage.setItem('spark_chat_history', '[]'); window.location.href='index.html';">
+                    onclick="localStorage.removeItem('spark_active_session_id'); window.location.href='index.html';">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M5 12h14"></path>
@@ -216,19 +216,17 @@
                                     <div class="setting-desc">The model used for new chats</div>
                                 </div>
 
-                                <div class="custom-select-container">
+                                <div class="custom-select-container" id="settings-model-container">
                                     <div class="custom-select-trigger">
-                                        <span class="selected-text">Qwen 3.5 Pro</span>
+                                        <span class="selected-text" id="settings-selected-model">Loading model...</span>
                                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
                                             viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                                             stroke-linecap="round" stroke-linejoin="round" class="chevron-icon">
                                             <path d="m6 9 6 6 6-6" />
                                         </svg>
                                     </div>
-                                    <div class="custom-options">
-                                        <div class="custom-option selected" data-value="pro">Qwen 3.5 Pro</div>
-                                        <div class="custom-option" data-value="fast">Qwen 3.5 Fast</div>
-                                        <div class="custom-option" data-value="coding">Qwen 3.5 Coding</div>
+                                    <div class="custom-options" id="settings-model-options">
+                                        <!-- Dynamically populated from models/ -->
                                     </div>
                                 </div>
 
@@ -323,8 +321,8 @@
 
     </div>
 
-    <script src="js/script.js" defer></script>
-
+    <script src="js/offline-api.js?v=6"></script>
+    <script src="js/script.js?v=6" defer></script>
 </body>
 
 </html>

@@ -1,21 +1,31 @@
-﻿/**
+/**
  * SparkV2 Offline API Client
- * Handles streaming communication with the local Qwen model engine
+ * Handles multi-session chat history, dynamic discovery of raw .gguf models,
+ * and streaming communication with the local llama.cpp router engine.
  */
 
-let conversationHistory = [];
-let currentModel = localStorage.getItem('spark_default_model') || 'pro';
+(function () {
+    'use strict';
 
-// Model configuration optimized for Qwen3.5-2B
-const modelConfigs = {
-    'pro': { temperature: 0.7, max_tokens: 2048, name: 'Qwen 3.5 Pro' },
-    'fast': { temperature: 0.5, max_tokens: 1024, name: 'Qwen 3.5 Fast' },
-    'coding': { temperature: 0.2, max_tokens: 2048, name: 'Qwen 3.5 Coding' }
+    const STORAGE_KEYS = {
+    sessions: 'spark_chat_sessions',
+    activeSession: 'spark_active_session_id',
+    legacyHistory: 'spark_chat_history',
+    selectedModel: 'spark_selected_model',
+    memory: 'spark_memory',
+    apiBase: 'spark_api_base'
 };
+
 const MAX_CONTEXT_MESSAGES = 16;
 
+let conversationHistory = [];
+let availableModels = [];
+let currentSelectedModel = localStorage.getItem(STORAGE_KEYS.selectedModel) || '';
+let activeSessionId = localStorage.getItem(STORAGE_KEYS.activeSession) || null;
+let sessionChangeListeners = [];
+
 function resolveApiBase() {
-    const explicit = window.SPARK_API_BASE || localStorage.getItem('spark_api_base');
+    const explicit = window.SPARK_API_BASE || localStorage.getItem(STORAGE_KEYS.apiBase);
     if (explicit) return String(explicit).replace(/\/+$/, '');
 
     // If currently hosted on port 5000 or similar, use same origin
@@ -25,42 +35,246 @@ function resolveApiBase() {
     return 'http://127.0.0.1:5000';
 }
 
-function loadConversationHistory() {
-    try {
-        const raw = localStorage.getItem('spark_chat_history');
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return [];
+function fetchWithTimeout(url, options = {}, timeoutMs = 4000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const signal = options.signal || controller.signal;
+    return fetch(url, { ...options, signal }).finally(() => clearTimeout(timer));
+}
 
-        return parsed.filter((message) => {
-            return (
-                message &&
-                typeof message === 'object' &&
-                typeof message.role === 'string' &&
-                typeof message.content === 'string'
-            );
-        });
-    } catch (error) {
-        console.warn('Failed to load chat history from storage:', error);
-        return [];
+function deriveTitle(text) {
+    if (!text) return 'New Conversation';
+    let clean = String(text)
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/[#*_`~]/g, '')
+        .trim();
+    if (clean.length > 36) {
+        clean = clean.substring(0, 36).trim() + '...';
+    }
+    return clean || 'New Conversation';
+}
+
+/* ==================== MULTI-SESSION PERSISTENCE ==================== */
+
+function getChatSessions() {
+    try {
+        const raw = localStorage.getItem(STORAGE_KEYS.sessions);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+                return parsed.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to parse chat sessions:', e);
+    }
+
+    // Migration from single spark_chat_history
+    try {
+        const legacyRaw = localStorage.getItem(STORAGE_KEYS.legacyHistory);
+        if (legacyRaw) {
+            const legacy = JSON.parse(legacyRaw);
+            if (Array.isArray(legacy) && legacy.length > 0) {
+                const firstUserMsg = legacy.find(m => m && m.role === 'user');
+                const title = firstUserMsg ? deriveTitle(firstUserMsg.content) : 'Previous Chat';
+                const initialSession = {
+                    id: 'chat-' + Date.now(),
+                    title: title,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                    messages: legacy
+                };
+                const initialList = [initialSession];
+                localStorage.setItem(STORAGE_KEYS.sessions, JSON.stringify(initialList));
+                localStorage.setItem(STORAGE_KEYS.activeSession, initialSession.id);
+                activeSessionId = initialSession.id;
+                return initialList;
+            }
+        }
+    } catch (e) {
+        console.warn('Migration error:', e);
+    }
+
+    return [];
+}
+
+function saveChatSessions(sessions) {
+    try {
+        localStorage.setItem(STORAGE_KEYS.sessions, JSON.stringify(sessions));
+    } catch (e) {
+        console.warn('Failed to save chat sessions:', e);
     }
 }
 
-let saveTimeout = null;
-function saveConversationHistory() {
-    if (saveTimeout) clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => {
-        try {
-            localStorage.setItem('spark_chat_history', JSON.stringify(conversationHistory));
-        } catch (error) {
-            console.warn('Failed to save chat history:', error);
+function getActiveSession() {
+    const sessions = getChatSessions();
+    if (!activeSessionId) return null;
+    return sessions.find(s => s.id === activeSessionId) || null;
+}
+
+function setActiveSessionId(sessionId) {
+    activeSessionId = sessionId;
+    if (sessionId) {
+        localStorage.setItem(STORAGE_KEYS.activeSession, sessionId);
+        const session = getActiveSession();
+        conversationHistory = session ? [...(session.messages || [])] : [];
+    } else {
+        localStorage.removeItem(STORAGE_KEYS.activeSession);
+        conversationHistory = [];
+    }
+    // Maintain legacy sync
+    try {
+        localStorage.setItem(STORAGE_KEYS.legacyHistory, JSON.stringify(conversationHistory));
+    } catch (_) {}
+
+    notifySessionChange();
+}
+
+function createNewSession(initialTitle = 'New Conversation') {
+    const newSession = {
+        id: 'chat-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+        title: initialTitle,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        messages: []
+    };
+    const sessions = getChatSessions();
+    sessions.unshift(newSession);
+    saveChatSessions(sessions);
+    setActiveSessionId(newSession.id);
+    return newSession;
+}
+
+function deleteChatSession(sessionId) {
+    let sessions = getChatSessions();
+    sessions = sessions.filter(s => s.id !== sessionId);
+    saveChatSessions(sessions);
+
+    if (activeSessionId === sessionId) {
+        if (sessions.length > 0) {
+            setActiveSessionId(sessions[0].id);
+        } else {
+            setActiveSessionId(null);
         }
-    }, 100);
+    } else {
+        notifySessionChange();
+    }
+}
+
+function clearAllChatSessions() {
+    localStorage.removeItem(STORAGE_KEYS.sessions);
+    localStorage.removeItem(STORAGE_KEYS.activeSession);
+    localStorage.setItem(STORAGE_KEYS.legacyHistory, '[]');
+    activeSessionId = null;
+    conversationHistory = [];
+    notifySessionChange();
+}
+
+function saveActiveSessionMessages() {
+    const sessions = getChatSessions();
+    let currentSession = sessions.find(s => s.id === activeSessionId);
+
+    if (!currentSession) {
+        // Auto-create session if sending a message from fresh state
+        const firstUser = conversationHistory.find(m => m.role === 'user');
+        const title = firstUser ? deriveTitle(firstUser.content) : 'New Conversation';
+        currentSession = {
+            id: activeSessionId || ('chat-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7)),
+            title: title,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            messages: [...conversationHistory]
+        };
+        activeSessionId = currentSession.id;
+        localStorage.setItem(STORAGE_KEYS.activeSession, activeSessionId);
+        sessions.unshift(currentSession);
+    } else {
+        currentSession.messages = [...conversationHistory];
+        currentSession.updatedAt = Date.now();
+        // Update title if it was default
+        if (currentSession.title === 'New Conversation') {
+            const firstUser = conversationHistory.find(m => m.role === 'user');
+            if (firstUser) currentSession.title = deriveTitle(firstUser.content);
+        }
+    }
+
+    saveChatSessions(sessions);
+    try {
+        localStorage.setItem(STORAGE_KEYS.legacyHistory, JSON.stringify(conversationHistory));
+    } catch (_) {}
+
+    notifySessionChange();
+}
+
+function notifySessionChange() {
+    sessionChangeListeners.forEach(listener => {
+        try { listener(); } catch (e) { console.error(e); }
+    });
+}
+
+function onSessionChange(callback) {
+    if (typeof callback === 'function') {
+        sessionChangeListeners.push(callback);
+    }
+}
+
+/* ==================== INITIALIZE ACTIVE SESSION ==================== */
+const initialActive = getActiveSession();
+if (initialActive) {
+    conversationHistory = [...(initialActive.messages || [])];
+} else {
+    const existing = getChatSessions();
+    if (existing.length > 0) {
+        activeSessionId = existing[0].id;
+        localStorage.setItem(STORAGE_KEYS.activeSession, activeSessionId);
+        conversationHistory = [...(existing[0].messages || [])];
+    } else {
+        conversationHistory = [];
+    }
+}
+
+/* ==================== DYNAMIC MODEL DISCOVERY ==================== */
+
+async function fetchAvailableModels() {
+    const apiBase = resolveApiBase();
+    try {
+        const res = await fetchWithTimeout(`${apiBase}/v1/models`, {
+            method: 'GET',
+            cache: 'no-store'
+        }, 4000);
+        if (res.ok) {
+            const json = await res.json();
+            const models = (json.data || []).map(m => m.id).filter(Boolean);
+            if (models.length > 0) {
+                availableModels = models;
+                if (!currentSelectedModel || !models.includes(currentSelectedModel)) {
+                    // Default to 2B if available, otherwise first model
+                    const preferred = models.find(m => /2B/i.test(m)) || models[0];
+                    currentSelectedModel = preferred;
+                    localStorage.setItem(STORAGE_KEYS.selectedModel, currentSelectedModel);
+                }
+                return models;
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to discover models from server:', e);
+    }
+    return currentSelectedModel ? [currentSelectedModel] : [];
+}
+
+function getSelectedModel() {
+    return currentSelectedModel || localStorage.getItem(STORAGE_KEYS.selectedModel) || '';
+}
+
+function setSelectedModel(modelId) {
+    currentSelectedModel = modelId;
+    localStorage.setItem(STORAGE_KEYS.selectedModel, modelId);
+    console.log('Selected model set to:', modelId);
 }
 
 function saveMemoryEntry(userMessage, assistantMessage) {
     try {
-        const raw = localStorage.getItem('spark_memory');
+        const raw = localStorage.getItem(STORAGE_KEYS.memory);
         const parsed = JSON.parse(raw || '[]');
         const memory = Array.isArray(parsed) ? parsed : [];
         memory.unshift({
@@ -69,7 +283,7 @@ function saveMemoryEntry(userMessage, assistantMessage) {
             assistant: assistantMessage || '',
             createdAt: new Date().toISOString()
         });
-        localStorage.setItem('spark_memory', JSON.stringify(memory.slice(0, 500)));
+        localStorage.setItem(STORAGE_KEYS.memory, JSON.stringify(memory.slice(0, 500)));
     } catch (error) {
         console.warn('Failed to store memory entry:', error);
     }
@@ -81,22 +295,9 @@ function buildRequestMessages(history) {
     return history.slice(-MAX_CONTEXT_MESSAGES);
 }
 
-conversationHistory = loadConversationHistory();
-
-window.updateModel = function (modelKey) {
-    if (!modelConfigs[modelKey]) {
-        console.warn(`Unknown model "${modelKey}". Falling back to "pro".`);
-        currentModel = 'pro';
-        return;
-    }
-    currentModel = modelKey;
-    localStorage.setItem('spark_default_model', modelKey);
-    console.log('Model updated to:', modelKey);
-};
-
 /**
  * Main function to fetch and stream response from the API
- * Supports both normal content and Qwen 3.5 reasoning_content tokens
+ * Directly uses the selected raw model name from models/
  */
 async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
     const normalizedMessage = String(userMessage || '').trim();
@@ -105,12 +306,23 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
         return;
     }
     conversationHistory.push({ role: "user", content: normalizedMessage });
-    saveConversationHistory();
+    saveActiveSessionMessages();
 
-    const config = modelConfigs[currentModel] || modelConfigs['pro'];
     const apiBase = resolveApiBase();
     let aiContent = "";
     let aiReasoning = "";
+
+    const requestBody = {
+        messages: buildRequestMessages(conversationHistory),
+        stream: true,
+        temperature: 0.7,
+        max_tokens: 2048
+    };
+
+    const targetModel = getSelectedModel();
+    if (targetModel) {
+        requestBody.model = targetModel;
+    }
 
     try {
         const response = await fetch(`${apiBase}/v1/chat/completions`, {
@@ -119,12 +331,7 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
                 'Content-Type': 'application/json',
                 'Accept': 'text/event-stream'
             },
-            body: JSON.stringify({
-                messages: buildRequestMessages(conversationHistory),
-                stream: true,
-                temperature: config.temperature,
-                max_tokens: config.max_tokens
-            }),
+            body: JSON.stringify(requestBody),
             signal: signal
         });
 
@@ -194,7 +401,7 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
         }
 
         conversationHistory.push({ role: "assistant", content: fullRecord });
-        saveConversationHistory();
+        saveActiveSessionMessages();
         saveMemoryEntry(normalizedMessage, fullRecord);
         uiUpdateCallback("", true, false);
 
@@ -205,7 +412,7 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
                 let partial = aiContent;
                 if (aiReasoning) partial = `<think>${aiReasoning}</think>\n\n` + aiContent;
                 conversationHistory.push({ role: "assistant", content: partial });
-                saveConversationHistory();
+                saveActiveSessionMessages();
             }
             uiUpdateCallback("", true, false);
         } else {
@@ -215,12 +422,15 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
     }
 }
 
-// Server health check helper
+// Robust Server Health Check
 async function checkServerHealth() {
     try {
         const apiBase = resolveApiBase();
-        const res = await fetch(`${apiBase}/health`, { signal: AbortSignal.timeout(2000) });
-        return res.ok;
+        const res = await fetchWithTimeout(`${apiBase}/health`, {
+            method: 'GET',
+            cache: 'no-store'
+        }, 3000);
+        return res.ok || res.status === 503;
     } catch {
         return false;
     }
@@ -232,8 +442,22 @@ window.getConversationHistory = function () { return conversationHistory; };
 window.getApiBase = resolveApiBase;
 window.checkServerHealth = checkServerHealth;
 window.clearConversationHistory = function () {
-    if (saveTimeout) clearTimeout(saveTimeout);
     conversationHistory = [];
-    localStorage.setItem('spark_chat_history', '[]');
-    console.log('Conversation history cleared');
+    saveActiveSessionMessages();
 };
+
+// Multi-session exports
+window.getChatSessions = getChatSessions;
+window.getActiveSessionId = function () { return activeSessionId; };
+window.setActiveSessionId = setActiveSessionId;
+window.createNewSession = createNewSession;
+window.deleteChatSession = deleteChatSession;
+window.clearAllChatSessions = clearAllChatSessions;
+window.onSessionChange = onSessionChange;
+
+// Dynamic raw model exports
+window.fetchAvailableModels = fetchAvailableModels;
+window.getSelectedModel = getSelectedModel;
+window.setSelectedModel = setSelectedModel;
+
+})();
