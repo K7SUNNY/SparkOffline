@@ -117,13 +117,13 @@ def main():
         
         print("\n[INFO] Starting inference server and verifying readiness...")
         if wait_for_server(process, server_url, timeout=20):
-            print(f"[INFO] Engine & Web UI confirmed ready! Opening {server_url}/index.html\n")
+            print(f"[INFO] Engine & Web UI confirmed ready! Opening {server_url}/\n")
             time.sleep(0.5)
-            webbrowser.open(f"{server_url}/index.html")
+            webbrowser.open(f"{server_url}/")
         else:
             if process.poll() is None:
                 print(f"[WARN] Startup check timed out, attempting to open browser anyway...")
-                webbrowser.open(f"{server_url}/index.html")
+                webbrowser.open(f"{server_url}/")
             else:
                 print(f"[ERROR] Could not start server. Please check port availability or permissions.")
                 sys.exit(1)

@@ -21,7 +21,7 @@ const MAX_CONTEXT_MESSAGES = 16;
 let conversationHistory = [];
 let availableModels = [];
 let currentSelectedModel = localStorage.getItem(STORAGE_KEYS.selectedModel) || '';
-let activeSessionId = localStorage.getItem(STORAGE_KEYS.activeSession) || null;
+let activeSessionId = null;
 let sessionChangeListeners = [];
 
 function resolveApiBase() {
@@ -86,8 +86,7 @@ function getChatSessions() {
                 };
                 const initialList = [initialSession];
                 localStorage.setItem(STORAGE_KEYS.sessions, JSON.stringify(initialList));
-                localStorage.setItem(STORAGE_KEYS.activeSession, initialSession.id);
-                activeSessionId = initialSession.id;
+                try { localStorage.removeItem(STORAGE_KEYS.legacyHistory); } catch (_) {}
                 return initialList;
             }
         }
@@ -106,6 +105,25 @@ function saveChatSessions(sessions) {
     }
 }
 
+function getCleanChatBasePath() {
+    if (typeof window === 'undefined') return '/';
+    const path = window.location.pathname || '/';
+    if (path.endsWith('index.html')) {
+        return path.replace(/index\.html$/, '') || '/';
+    }
+    return path || '/';
+}
+
+function getChatIdFromUrl() {
+    if (typeof window === 'undefined') return null;
+    try {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('chat') || params.get('session') || params.get('c') || params.get('id');
+    } catch {
+        return null;
+    }
+}
+
 function getActiveSession() {
     const sessions = getChatSessions();
     if (!activeSessionId) return null;
@@ -115,17 +133,29 @@ function getActiveSession() {
 function setActiveSessionId(sessionId) {
     activeSessionId = sessionId;
     if (sessionId) {
-        localStorage.setItem(STORAGE_KEYS.activeSession, sessionId);
         const session = getActiveSession();
         conversationHistory = session ? [...(session.messages || [])] : [];
     } else {
-        localStorage.removeItem(STORAGE_KEYS.activeSession);
         conversationHistory = [];
     }
-    // Maintain legacy sync
-    try {
-        localStorage.setItem(STORAGE_KEYS.legacyHistory, JSON.stringify(conversationHistory));
-    } catch (_) {}
+
+    // Sync URL without full page reload
+    if (typeof window !== 'undefined' && window.history && (window.history.pushState || window.history.replaceState)) {
+        try {
+            const basePath = getCleanChatBasePath();
+            const currentChat = getChatIdFromUrl();
+            if (sessionId) {
+                if (currentChat !== sessionId) {
+                    const newUrl = `${basePath}?chat=${encodeURIComponent(sessionId)}`;
+                    window.history.pushState({ sessionId }, '', newUrl);
+                }
+            } else {
+                if (currentChat !== null || window.location.search.length > 0) {
+                    window.history.pushState({ sessionId: null }, '', basePath);
+                }
+            }
+        } catch (_) {}
+    }
 
     notifySessionChange();
 }
@@ -151,11 +181,7 @@ function deleteChatSession(sessionId) {
     saveChatSessions(sessions);
 
     if (activeSessionId === sessionId) {
-        if (sessions.length > 0) {
-            setActiveSessionId(sessions[0].id);
-        } else {
-            setActiveSessionId(null);
-        }
+        setActiveSessionId(null);
     } else {
         notifySessionChange();
     }
@@ -163,10 +189,15 @@ function deleteChatSession(sessionId) {
 
 function clearAllChatSessions() {
     localStorage.removeItem(STORAGE_KEYS.sessions);
-    localStorage.removeItem(STORAGE_KEYS.activeSession);
-    localStorage.setItem(STORAGE_KEYS.legacyHistory, '[]');
+    try { localStorage.removeItem(STORAGE_KEYS.activeSession); } catch (_) {}
+    try { localStorage.removeItem(STORAGE_KEYS.legacyHistory); } catch (_) {}
     activeSessionId = null;
     conversationHistory = [];
+    if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
+        try {
+            window.history.replaceState(null, '', getCleanChatBasePath());
+        } catch (_) {}
+    }
     notifySessionChange();
 }
 
@@ -186,8 +217,15 @@ function saveActiveSessionMessages() {
             messages: [...conversationHistory]
         };
         activeSessionId = currentSession.id;
-        localStorage.setItem(STORAGE_KEYS.activeSession, activeSessionId);
         sessions.unshift(currentSession);
+
+        if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
+            try {
+                const basePath = getCleanChatBasePath();
+                const newUrl = `${basePath}?chat=${encodeURIComponent(activeSessionId)}`;
+                window.history.replaceState({ sessionId: activeSessionId }, '', newUrl);
+            } catch (_) {}
+        }
     } else {
         currentSession.messages = [...conversationHistory];
         currentSession.updatedAt = Date.now();
@@ -199,10 +237,6 @@ function saveActiveSessionMessages() {
     }
 
     saveChatSessions(sessions);
-    try {
-        localStorage.setItem(STORAGE_KEYS.legacyHistory, JSON.stringify(conversationHistory));
-    } catch (_) {}
-
     notifySessionChange();
 }
 
@@ -219,18 +253,59 @@ function onSessionChange(callback) {
 }
 
 /* ==================== INITIALIZE ACTIVE SESSION ==================== */
-const initialActive = getActiveSession();
-if (initialActive) {
-    conversationHistory = [...(initialActive.messages || [])];
-} else {
-    const existing = getChatSessions();
-    if (existing.length > 0) {
-        activeSessionId = existing[0].id;
-        localStorage.setItem(STORAGE_KEYS.activeSession, activeSessionId);
-        conversationHistory = [...(existing[0].messages || [])];
-    } else {
-        conversationHistory = [];
+function initializeActiveSession() {
+    // Purge any legacy session or history keys so they can never force-restore an old conversation
+    try {
+        localStorage.removeItem(STORAGE_KEYS.activeSession);
+        localStorage.removeItem(STORAGE_KEYS.legacyHistory);
+    } catch (_) {}
+
+    const requestedChatId = getChatIdFromUrl();
+
+    if (requestedChatId) {
+        const sessions = getChatSessions();
+        const matched = sessions.find(s => s.id === requestedChatId);
+        if (matched) {
+            activeSessionId = matched.id;
+            conversationHistory = [...(matched.messages || [])];
+            return;
+        } else {
+            // Clean up invalid chat parameter from URL
+            if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
+                try {
+                    window.history.replaceState(null, '', getCleanChatBasePath());
+                } catch (_) {}
+            }
+        }
     }
+
+    // Default on startup / fresh open: ALWAYS start in a new chat window!
+    activeSessionId = null;
+    conversationHistory = [];
+}
+
+initializeActiveSession();
+
+if (typeof window !== 'undefined') {
+    window.addEventListener('popstate', () => {
+        const requestedChatId = getChatIdFromUrl();
+
+        if (requestedChatId) {
+            const sessions = getChatSessions();
+            const matched = sessions.find(s => s.id === requestedChatId);
+            if (matched) {
+                activeSessionId = matched.id;
+                conversationHistory = [...(matched.messages || [])];
+            } else {
+                activeSessionId = null;
+                conversationHistory = [];
+            }
+        } else {
+            activeSessionId = null;
+            conversationHistory = [];
+        }
+        notifySessionChange();
+    });
 }
 
 /* ==================== DYNAMIC MODEL DISCOVERY ==================== */

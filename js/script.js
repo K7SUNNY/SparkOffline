@@ -245,9 +245,14 @@ function initChatPage() {
     }
 
     function hideWelcomeIfNeeded() {
-        if (welcomeScreen && !welcomeScreen.classList.contains('hidden')) {
-            welcomeScreen.classList.add('hidden');
-            setTimeout(() => welcomeScreen.remove(), 300);
+        const welcome = document.getElementById('welcome-screen');
+        if (welcome) {
+            welcome.classList.add('hidden');
+            setTimeout(() => {
+                if (welcome && welcome.parentNode) {
+                    welcome.parentNode.removeChild(welcome);
+                }
+            }, 300);
         }
     }
 
@@ -442,7 +447,7 @@ function initChatPage() {
                     window.setActiveSessionId(session.id);
                 }
                 if (!document.getElementById('chat-area')) {
-                    window.location.href = 'index.html';
+                    window.location.href = '/?chat=' + encodeURIComponent(session.id);
                     return;
                 }
                 hydrateChatHistory();
@@ -461,6 +466,15 @@ function initChatPage() {
         });
     }
 
+    function renderWelcomeScreen() {
+        chatArea.innerHTML = `
+            <div id="welcome-screen" class="welcome-screen">
+                <h2>Hey, I'm Spark</h2>
+                <p>Powered by <strong>Qwen 3.5</strong> on your device with hardware acceleration. Ask me anything...</p>
+            </div>
+        `;
+    }
+
     function hydrateChatHistory() {
         if (typeof window.getConversationHistory !== 'function') return;
         const history = window.getConversationHistory();
@@ -468,12 +482,7 @@ function initChatPage() {
         chatArea.innerHTML = '';
 
         if (!Array.isArray(history) || history.length === 0) {
-            chatArea.innerHTML = `
-                <div id="welcome-screen" class="welcome-screen">
-                    <h2>Hey, I'm Spark</h2>
-                    <p>Powered by <strong>Qwen 3.5</strong> on your device with hardware acceleration. Ask me anything...</p>
-                </div>
-            `;
+            renderWelcomeScreen();
             return;
         }
 
@@ -481,12 +490,7 @@ function initChatPage() {
             (message) => message && typeof message === 'object' && message.role !== 'system'
         );
         if (visibleMessages.length === 0) {
-            chatArea.innerHTML = `
-                <div id="welcome-screen" class="welcome-screen">
-                    <h2>Hey, I'm Spark</h2>
-                    <p>Powered by <strong>Qwen 3.5</strong> on your device with hardware acceleration. Ask me anything...</p>
-                </div>
-            `;
+            renderWelcomeScreen();
             return;
         }
 
@@ -501,10 +505,10 @@ function initChatPage() {
     }
 
     // New Chat Action: resets conversation cleanly without page reload flash
-    newChatBtn?.addEventListener('click', (e) => {
-        e.preventDefault();
+    function startNewChat() {
         if (isGenerating && abortController) {
             abortController.abort();
+            abortController = null;
         }
         if (typeof window.setActiveSessionId === 'function') {
             window.setActiveSessionId(null);
@@ -513,6 +517,8 @@ function initChatPage() {
         renderSidebarHistory();
         setGeneratingState(false);
         chatInput.value = '';
+        chatInput.style.height = 'auto';
+        sendBtn.disabled = true;
         chatInput.focus();
 
         const sidebar = document.getElementById('sidebar');
@@ -521,6 +527,39 @@ function initChatPage() {
             sidebar.classList.remove('open');
             overlay?.classList.add('hidden');
         }
+    }
+
+    const newChatButtons = document.querySelectorAll('.new-chat-btn');
+    newChatButtons.forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            startNewChat();
+        });
+    });
+
+    const chatsNavLinks = document.querySelectorAll('.sidebar-nav a[href="/"], .sidebar-nav a[href="index.html"], .sidebar-nav a[href="."]');
+    chatsNavLinks.forEach((link) => {
+        link.addEventListener('click', (e) => {
+            if (document.getElementById('chat-area')) {
+                e.preventDefault();
+                startNewChat();
+            }
+        });
+    });
+
+    const mobileChatNavLinks = document.querySelectorAll('.mobile-bottom-nav a[href="/"], .mobile-bottom-nav a[href="index.html"], .mobile-bottom-nav a[href="."]');
+    mobileChatNavLinks.forEach((link) => {
+        link.addEventListener('click', (e) => {
+            if (document.getElementById('chat-area')) {
+                e.preventDefault();
+                startNewChat();
+            }
+        });
+    });
+
+    const headerProfileBtn = document.querySelector('.top-header .profile-btn');
+    headerProfileBtn?.addEventListener('click', () => {
+        window.location.href = 'profile.html';
     });
 
     function handleFormSubmit() {
@@ -679,6 +718,11 @@ function initChatPage() {
     if (typeof window.onSessionChange === 'function') {
         window.onSessionChange(renderSidebarHistory);
     }
+
+    window.addEventListener('popstate', () => {
+        hydrateChatHistory();
+        renderSidebarHistory();
+    });
 
     // Check server status indicator
     updateServerStatusIndicator();

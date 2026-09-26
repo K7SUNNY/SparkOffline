@@ -1,4 +1,4 @@
-﻿param (
+param (
     [int]$Port = 5000,
     [int]$ContextSize = 2048,
     [switch]$ForceCpu,
@@ -59,7 +59,7 @@ while (-not $ready -and $attempts -lt 15) {
 
 Write-Host "[INFO] Model & CSS confirmed ready! Opening browser..." -ForegroundColor Green
 Start-Sleep -Milliseconds 500
-Start-Process "http://localhost:$Port/index.html"
+Start-Process "http://localhost:$Port/"
 
 Write-Host "`nServer is running! Press Ctrl+C in this window to stop.`n" -ForegroundColor Gray
 
