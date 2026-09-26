@@ -364,10 +364,109 @@ function saveMemoryEntry(userMessage, assistantMessage) {
     }
 }
 
-function buildRequestMessages(history) {
+let cachedSystemPrompt = null;
+let lastPromptFetchTime = 0;
+
+async function fetchSystemPrompt() {
+    const now = Date.now();
+    // Cache for 2.5 seconds so rapid messages don't refetch, but edits in system_prompt.txt apply immediately
+    if (cachedSystemPrompt !== null && (now - lastPromptFetchTime < 2500)) {
+        return cachedSystemPrompt;
+    }
+    const apiBase = resolveApiBase();
+    try {
+        const res = await fetchWithTimeout(`${apiBase}/system_prompt.txt?t=${now}`, {
+            method: 'GET',
+            cache: 'no-store'
+        }, 2000);
+        if (res.ok) {
+            const raw = await res.text();
+            if (raw && raw.trim().length > 0) {
+                cachedSystemPrompt = raw.trim();
+                lastPromptFetchTime = now;
+                return cachedSystemPrompt;
+            }
+        }
+    } catch (e) {
+        console.warn('Could not load system_prompt.txt, using fallback:', e);
+    }
+    return cachedSystemPrompt || '';
+}
+
+const SETTINGS_STORAGE_KEYS = {
+    contextWindow: 'spark_context_window',
+    maxTokens: 'spark_max_tokens',
+    historyWindowSize: 'spark_history_window_size',
+    temperature: 'spark_temperature',
+    enableThinking: 'spark_enable_thinking'
+};
+
+function isThinkingEnabled() {
+    // Default to false so Qwen responds immediately without long thinking
+    return localStorage.getItem(SETTINGS_STORAGE_KEYS.enableThinking) === 'true';
+}
+
+function setThinkingEnabled(enabled) {
+    localStorage.setItem(SETTINGS_STORAGE_KEYS.enableThinking, enabled ? 'true' : 'false');
+}
+
+function getHistoryWindowSize() {
+    const saved = localStorage.getItem(SETTINGS_STORAGE_KEYS.historyWindowSize);
+    const parsed = parseInt(saved, 10);
+    return (!isNaN(parsed) && parsed >= 2 && parsed <= 64) ? parsed : 16;
+}
+
+function getMaxTokens() {
+    const saved = localStorage.getItem(SETTINGS_STORAGE_KEYS.maxTokens);
+    const parsed = parseInt(saved, 10);
+    return (!isNaN(parsed) && parsed >= 128 && parsed <= 8192) ? parsed : 2048;
+}
+
+function getTemperature() {
+    const saved = localStorage.getItem(SETTINGS_STORAGE_KEYS.temperature);
+    const parsed = parseFloat(saved);
+    return (!isNaN(parsed) && parsed >= 0.0 && parsed <= 2.0) ? parsed : 0.7;
+}
+
+function getContextWindow() {
+    const saved = localStorage.getItem(SETTINGS_STORAGE_KEYS.contextWindow);
+    const parsed = parseInt(saved, 10);
+    return (!isNaN(parsed) && parsed >= 512 && parsed <= 32768) ? parsed : 2048;
+}
+
+async function buildRequestMessages(history) {
     if (!Array.isArray(history)) return [];
-    if (history.length <= MAX_CONTEXT_MESSAGES) return history;
-    return history.slice(-MAX_CONTEXT_MESSAGES);
+    
+    // Prune history using configurable history window size
+    const maxHistory = getHistoryWindowSize();
+    const recentHistory = history.length <= maxHistory
+        ? [...history]
+        : history.slice(-maxHistory);
+
+    const requestMessages = [];
+
+    // 1. Inject live system prompt from system_prompt.txt
+    let systemPrompt = await fetchSystemPrompt();
+    if (!systemPrompt) {
+        systemPrompt = "You are Spark, an intelligent, helpful, and concise local AI assistant powered by Qwen 3.5.\nYou are running 100% offline and privately on the user's machine.";
+    }
+
+    // 2. Dynamically attach the thinking instruction controlled by the Thinking: Off/On button
+    if (isThinkingEnabled()) {
+        systemPrompt += "\n\n[Instruction: Deep Thinking Mode ENABLED]\nYou should think step-by-step and provide detailed reasoning inside <think>...</think> tags before providing your final answer.";
+    } else {
+        systemPrompt += "\n\n[Instruction: Fast Response Mode - Thinking DISABLED]\nDo NOT use <think> tags, internal monologue, or chain-of-thought reasoning. Answer directly, concisely, and immediately with the final response only.";
+    }
+
+    requestMessages.push({
+        role: "system",
+        content: systemPrompt
+    });
+
+    // 2. Add user & assistant chat messages
+    requestMessages.push(...recentHistory);
+
+    return requestMessages;
 }
 
 /**
@@ -387,12 +486,21 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
     let aiContent = "";
     let aiReasoning = "";
 
+    const messages = await buildRequestMessages(conversationHistory);
+
     const requestBody = {
-        messages: buildRequestMessages(conversationHistory),
+        messages: messages,
         stream: true,
-        temperature: 0.7,
-        max_tokens: 2048
+        temperature: getTemperature(),
+        max_tokens: getMaxTokens(),
+        n_predict: getMaxTokens()
     };
+
+    if (!isThinkingEnabled()) {
+        // Hard-stop Qwen internal chain-of-thought to reply immediately without delay
+        requestBody.reasoning_budget = 0;
+        requestBody.chat_template_kwargs = { reasoning: false };
+    }
 
     const targetModel = getSelectedModel();
     if (targetModel) {
@@ -534,5 +642,12 @@ window.onSessionChange = onSessionChange;
 window.fetchAvailableModels = fetchAvailableModels;
 window.getSelectedModel = getSelectedModel;
 window.setSelectedModel = setSelectedModel;
+window.fetchSystemPrompt = fetchSystemPrompt;
+window.getTemperature = getTemperature;
+window.getMaxTokens = getMaxTokens;
+window.getHistoryWindowSize = getHistoryWindowSize;
+window.getContextWindow = getContextWindow;
+window.isThinkingEnabled = isThinkingEnabled;
+window.setThinkingEnabled = setThinkingEnabled;
 
 })();

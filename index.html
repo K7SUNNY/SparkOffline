@@ -93,7 +93,7 @@
         })();
     </script>
 
-    <link rel="stylesheet" href="/css/style.css?v=3">
+    <link rel="stylesheet" href="/css/style.css?v=12">
     <link rel="icon" href="/assets/favicon.ico">
     <script src="/js/marked.min.js?v=2" defer></script>
     <script src="/js/highlight.min.js?v=2" defer></script>
@@ -260,24 +260,34 @@
 
                     <div class="input-footer">
 
-                        <div class="model-selector-wrapper">
-                            <button type="button" id="model-btn" class="model-pill">
-                                <svg width="20" height="20" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M150 10 L60 140 H120 L100 246 L196 116 H136 Z" fill="currentColor" />
-                                </svg>
-                                <span id="current-model">Loading model...</span>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
-                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                    stroke-linejoin="round" class="chevron">
-                                    <path d="m6 9 6 6 6-6" />
-                                </svg>
-                            </button>
+                        <div class="footer-left-controls" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                            <div class="model-selector-wrapper">
+                                <button type="button" id="model-btn" class="model-pill">
+                                    <svg width="20" height="20" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M150 10 L60 140 H120 L100 246 L196 116 H136 Z" fill="currentColor" />
+                                    </svg>
+                                    <span id="current-model">Loading model...</span>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
+                                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                        stroke-linejoin="round" class="chevron">
+                                        <path d="m6 9 6 6 6-6" />
+                                    </svg>
+                                </button>
 
-                            <div id="model-menu" class="model-menu hidden">
-                                <div class="model-option" style="cursor: default; opacity: 0.7;">
-                                    <span class="model-name">Scanning models/ ...</span>
+                                <div id="model-menu" class="model-menu hidden">
+                                    <div class="model-option" style="cursor: default; opacity: 0.7;">
+                                        <span class="model-name">Scanning models/ ...</span>
+                                    </div>
                                 </div>
                             </div>
+
+                            <button type="button" id="thinking-quick-toggle" class="model-pill" title="Toggle AI Deep Thinking (Chain-of-thought)">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 2a6 6 0 0 0-6 6c0 2.22 1.2 4.16 3 5.2V17a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-3.8c1.8-1.04 3-2.98 3-5.2a6 6 0 0 0-6-6z"/>
+                                    <path d="M9 21h6"/>
+                                </svg>
+                                <span id="thinking-quick-label">Thinking: Off</span>
+                            </button>
                         </div>
 
                         <button type="submit" id="send-btn" class="send-btn" disabled name="send-chat"
@@ -338,8 +348,8 @@
 
     </div>
 
-    <script src="js/offline-api.js?v=9"></script>
-    <script src="js/script.js?v=9" defer></script>
+    <script src="js/offline-api.js?v=13"></script>
+    <script src="js/script.js?v=13" defer></script>
 </body>
 
 </html>

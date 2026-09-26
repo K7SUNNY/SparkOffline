@@ -19,8 +19,8 @@
     <script>
         (function(){function r(){var l=document.getElementById('app-loader');if(l&&!l.classList.contains('fade-out')){l.classList.add('fade-out');setTimeout(function(){if(l&&l.parentNode)l.parentNode.removeChild(l);},450);}}window.addEventListener('load',function(){setTimeout(r,250);});setTimeout(r,2500);})();
     </script>
-    <link rel="stylesheet" href="/css/style.css?v=3" />
-    <link rel="stylesheet" href="/css/setting.css?v=3" />
+    <link rel="stylesheet" href="/css/style.css?v=12" />
+    <link rel="stylesheet" href="/css/setting.css?v=12" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -216,7 +216,7 @@
                                     <div class="setting-desc">The model used for new chats</div>
                                 </div>
 
-                                <div class="custom-select-container" id="settings-model-container">
+                                <div class="custom-select-container" id="settings-model-container" data-setting-key="spark_selected_model">
                                     <div class="custom-select-trigger">
                                         <span class="selected-text" id="settings-selected-model">Loading model...</span>
                                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
@@ -232,16 +232,204 @@
 
                             </div>
                             <div class="setting-divider"></div>
-                            <div class="setting-row">
+                            <div class="setting-row" id="system-instructions-row" style="cursor: pointer;">
                                 <div>
                                     <div class="setting-label">System Instructions</div>
-                                    <div class="setting-desc">Custom behavior for the AI</div>
+                                    <div class="setting-desc">Configured in <code>system_prompt.txt</code> in project root</div>
                                 </div>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                    stroke-linejoin="round" class="chevron-right">
-                                    <path d="m9 18 6-6-6-6" />
-                                </svg>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span style="font-size: 12px; color: var(--accent-color, #6366f1); font-weight: 500;">View Rules</span>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                        stroke-linejoin="round" class="chevron-right">
+                                        <path d="m9 18 6-6-6-6" />
+                                    </svg>
+                                </div>
+                            </div>
+                            <div id="system-instructions-preview" style="display: none; padding: 14px 16px; background: rgba(255,255,255,0.03); border-radius: 8px; margin: 0 16px 14px 16px; border: 1px solid var(--border-color);">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <span style="font-size: 11px; text-transform: uppercase; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.5px;">Active Rules (system_prompt.txt)</span>
+                                    <span style="font-size: 11px; color: #10b981; font-weight: 500;">● Live</span>
+                                </div>
+                                <pre id="system-instructions-text" style="font-family: monospace; font-size: 12px; line-height: 1.5; color: var(--text-primary); white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow-y: auto; margin: 0; background: transparent; border: none; padding: 0;"></pre>
+                                <div style="font-size: 11px; color: var(--text-secondary); margin-top: 10px;">To edit rules, open <code>system_prompt.txt</code> in your SparkOffline folder with Notepad or any editor. Changes apply immediately!</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="setting-section">
+                        <div class="section-header">
+                            <h2>Model Parameters & Memory</h2>
+                            <p>Configure context window, max tokens, history window, and temperature.</p>
+                        </div>
+                        <div class="setting-card">
+                            <!-- Deep Thinking Toggle -->
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label-group">
+                                        <span class="setting-label">Deep Thinking (Reasoning)</span>
+                                        <button type="button" class="hint-btn" data-hint="hint-thinking" title="Explain Thinking Mode" aria-label="Thinking Mode info">?</button>
+                                    </div>
+                                    <div class="setting-desc">Generate internal reasoning tokens before replying (slower)</div>
+                                </div>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="toggle-thinking">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="setting-hint-banner hidden" id="hint-thinking">
+                                <strong>Deep Thinking:</strong> Qwen 3.5 can generate internal chain-of-thought tokens before its answer.
+                                <ul>
+                                    <li><strong>OFF (Recommended for speed):</strong> The AI replies immediately without thinking delays. Ideal for fast chat and testing.</li>
+                                    <li><strong>ON:</strong> Allows step-by-step reasoning steps before the answer. Useful for complex logic or math puzzles, but takes longer on local hardware.</li>
+                                </ul>
+                            </div>
+
+                            <div class="setting-divider"></div>
+
+                            <!-- Context Window -->
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label-group">
+                                        <span class="setting-label">Context Window</span>
+                                        <button type="button" class="hint-btn" data-hint="hint-context" title="Explain Context Window" aria-label="Context Window info">?</button>
+                                    </div>
+                                    <div class="setting-desc">Total token capacity for prompt, chat history, and generation</div>
+                                </div>
+
+                                <div class="custom-select-container" id="settings-context-container" data-setting-key="spark_context_window">
+                                    <div class="custom-select-trigger">
+                                        <span class="selected-text">2048 tokens (Default)</span>
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                                            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                            stroke-linecap="round" stroke-linejoin="round" class="chevron-icon">
+                                            <path d="m6 9 6 6 6-6" />
+                                        </svg>
+                                    </div>
+                                    <div class="custom-options">
+                                        <div class="custom-option" data-value="1024">1024 tokens</div>
+                                        <div class="custom-option selected" data-value="2048">2048 tokens (Default)</div>
+                                        <div class="custom-option" data-value="4096">4096 tokens</div>
+                                        <div class="custom-option" data-value="8192">8192 tokens</div>
+                                        <div class="custom-option" data-value="16384">16384 tokens</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="setting-hint-banner hidden" id="hint-context">
+                                <strong>Context Window:</strong> The overall memory ceiling (in tokens) used by the inference engine per conversation turn.
+                                <ul>
+                                    <li><strong>1024 – 2048 tokens:</strong> Ultra-fast, minimal RAM/VRAM footprint. Perfect for quick questions and limited hardware.</li>
+                                    <li><strong>4096 tokens (Balanced):</strong> Standard for smooth multi-turn chats and medium tasks.</li>
+                                    <li><strong>8192 – 16384 tokens:</strong> Enables deep long-context discussions, large document parsing, or extensive code reviews. Requires more GPU VRAM.</li>
+                                </ul>
+                            </div>
+
+                            <div class="setting-divider"></div>
+
+                            <!-- Max Token -->
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label-group">
+                                        <span class="setting-label">Max Token</span>
+                                        <button type="button" class="hint-btn" data-hint="hint-maxtokens" title="Explain Max Token" aria-label="Max Token info">?</button>
+                                    </div>
+                                    <div class="setting-desc">Maximum tokens the model can generate in a single response</div>
+                                </div>
+
+                                <div class="custom-select-container" id="settings-maxtokens-container" data-setting-key="spark_max_tokens">
+                                    <div class="custom-select-trigger">
+                                        <span class="selected-text">2048 tokens (Default)</span>
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                                            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                            stroke-linecap="round" stroke-linejoin="round" class="chevron-icon">
+                                            <path d="m6 9 6 6 6-6" />
+                                        </svg>
+                                    </div>
+                                    <div class="custom-options">
+                                        <div class="custom-option" data-value="512">512 tokens (~380 words)</div>
+                                        <div class="custom-option" data-value="1024">1024 tokens (~750 words)</div>
+                                        <div class="custom-option selected" data-value="2048">2048 tokens (Default)</div>
+                                        <div class="custom-option" data-value="4096">4096 tokens (~3000 words)</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="setting-hint-banner hidden" id="hint-maxtokens">
+                                <strong>Max Token:</strong> Caps how long the AI's reply can be in a single message.
+                                <ul>
+                                    <li><strong>512 – 1024 tokens:</strong> Great for fast, concise responses and saves generation time.</li>
+                                    <li><strong>2048 tokens (Standard):</strong> Suitable for essays, complete functions, and detailed explanations.</li>
+                                    <li><strong>4096 tokens:</strong> Allows lengthy code blocks, in-depth reports, and comprehensive guides without cutting off mid-sentence.</li>
+                                </ul>
+                            </div>
+
+                            <div class="setting-divider"></div>
+
+                            <!-- History window size -->
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label-group">
+                                        <span class="setting-label">History window size</span>
+                                        <button type="button" class="hint-btn" data-hint="hint-history" title="Explain History Window Size" aria-label="History window size info">?</button>
+                                    </div>
+                                    <div class="setting-desc">Recent chat messages retained and sent as context</div>
+                                </div>
+
+                                <div class="custom-select-container" id="settings-history-container" data-setting-key="spark_history_window_size">
+                                    <div class="custom-select-trigger">
+                                        <span class="selected-text">16 messages (Default)</span>
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                                            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                            stroke-linecap="round" stroke-linejoin="round" class="chevron-icon">
+                                            <path d="m6 9 6 6 6-6" />
+                                        </svg>
+                                    </div>
+                                    <div class="custom-options">
+                                        <div class="custom-option" data-value="4">4 messages</div>
+                                        <div class="custom-option" data-value="8">8 messages</div>
+                                        <div class="custom-option selected" data-value="16">16 messages (Default)</div>
+                                        <div class="custom-option" data-value="24">24 messages</div>
+                                        <div class="custom-option" data-value="32">32 messages</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="setting-hint-banner hidden" id="hint-history">
+                                <strong>History Window Size:</strong> How many past conversational messages (both user questions and AI replies) are sent to the model with each new prompt.
+                                <ul>
+                                    <li><strong>4 – 8 messages:</strong> Minimal prompt processing overhead; keeps responses fast and focuses on immediate questions.</li>
+                                    <li><strong>16 messages (Recommended):</strong> Maintains clear conversational flow and references to recent answers without bloating the prompt.</li>
+                                    <li><strong>24 – 32 messages:</strong> Keeps extensive chat context for deep step-by-step problem solving and iterative coding sessions.</li>
+                                </ul>
+                            </div>
+
+                            <div class="setting-divider"></div>
+
+                            <!-- Temperature -->
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label-group">
+                                        <span class="setting-label">Temperature</span>
+                                        <button type="button" class="hint-btn" data-hint="hint-temperature" title="Explain Temperature" aria-label="Temperature info">?</button>
+                                    </div>
+                                    <div class="setting-desc">Adjust randomness and creativity in AI responses</div>
+                                </div>
+
+                                <div class="slider-group">
+                                    <input type="range" id="temp-slider" min="0.0" max="1.2" step="0.05" value="0.70" class="setting-range" aria-label="Temperature slider">
+                                    <span class="value-badge" id="temp-value-badge">0.70</span>
+                                </div>
+                            </div>
+
+                            <div class="setting-hint-banner hidden" id="hint-temperature">
+                                <strong>Temperature:</strong> Governs how strictly the model picks probable words versus exploring varied phrases.
+                                <ul>
+                                    <li><strong>0.0 – 0.3 (Strict & Deterministic):</strong> Highest accuracy; ideal for math, programming, debugging, and factual lookups.</li>
+                                    <li><strong>0.70 (Balanced - Default):</strong> Great combination of coherence and natural conversational variety.</li>
+                                    <li><strong>0.9 – 1.2 (Creative & Expressive):</strong> More unexpected ideas and varied vocabulary; ideal for storytelling, brainstorming, and creative writing.</li>
+                                </ul>
                             </div>
                         </div>
                     </div>
@@ -321,8 +509,8 @@
 
     </div>
 
-    <script src="js/offline-api.js?v=9"></script>
-    <script src="js/script.js?v=9" defer></script>
+    <script src="js/offline-api.js?v=13"></script>
+    <script src="js/script.js?v=13" defer></script>
 </body>
 
 </html>

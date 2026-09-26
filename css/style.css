@@ -957,3 +957,15 @@ a:focus-visible {
     background-color: #f59e0b;
     transition: background-color 0.3s ease;
 }
+
+
+/* Quick Thinking Toggle Pill */
+#thinking-quick-toggle.active {
+    background-color: rgba(99, 102, 241, 0.16);
+    border-color: #6366f1;
+    color: #a5b4fc;
+}
+#thinking-quick-toggle:hover {
+    background-color: var(--bg-hover);
+    border-color: var(--text-secondary);
+}

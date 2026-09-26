@@ -1,4 +1,4 @@
-﻿# SparkV2 Offline (Qwen 3.5 Local AI)
+# SparkV2 Offline (Qwen 3.5 Local AI)
 
 SparkV2 is a high-performance, 100% offline local AI chat application powered by `Qwen3.5-2B-Q4_K_M.gguf`.
 
@@ -59,6 +59,7 @@ SparkOffline/
 ├── memory.html                  # Local memory page
 ├── settings.html                # Model and theme preferences
 ├── profile.html                 # Profile page
+├── system_prompt.txt          # Editable system instructions & rules
 ├── server.py                    # Standalone Python server
 ├── start.bat                    # 1-Click launcher
 └── run.ps1                      # PowerShell launcher

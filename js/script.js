@@ -230,6 +230,42 @@ function initChatPage() {
         currentModelText.textContent = cachedModel.replace(/\.gguf$/i, '');
     }
 
+    // Thinking quick toggle button in chat input footer
+    const thinkingBtn = document.getElementById('thinking-quick-toggle');
+    const thinkingLabel = document.getElementById('thinking-quick-label');
+
+    function updateThinkingQuickBtn() {
+        const isEnabled = typeof window.isThinkingEnabled === 'function'
+            ? window.isThinkingEnabled()
+            : localStorage.getItem('spark_enable_thinking') === 'true';
+
+        if (thinkingBtn) {
+            thinkingBtn.classList.toggle('active', isEnabled);
+            thinkingBtn.setAttribute('title', isEnabled
+                ? 'Deep Thinking is ON (Click to disable for instant replies)'
+                : 'Deep Thinking is OFF (Instant replies, zero delay. Click to enable)');
+        }
+        if (thinkingLabel) {
+            thinkingLabel.textContent = isEnabled ? 'Thinking: On' : 'Thinking: Off';
+        }
+    }
+
+    if (thinkingBtn) {
+        updateThinkingQuickBtn();
+        thinkingBtn.addEventListener('click', () => {
+            const current = typeof window.isThinkingEnabled === 'function'
+                ? window.isThinkingEnabled()
+                : localStorage.getItem('spark_enable_thinking') === 'true';
+            const next = !current;
+            if (typeof window.setThinkingEnabled === 'function') {
+                window.setThinkingEnabled(next);
+            } else {
+                localStorage.setItem('spark_enable_thinking', next ? 'true' : 'false');
+            }
+            updateThinkingQuickBtn();
+        });
+    }
+
     let isGenerating = false;
     let abortController = null;
     let firstChunkReceived = false;
@@ -858,7 +894,7 @@ function initSettingsPage() {
 
     function setSelectValue(container, value) {
         const options = Array.from(container.querySelectorAll('.custom-option'));
-        const target = options.find((option) => option.dataset.value === value) || options[0];
+        const target = options.find((option) => option.dataset.value === String(value)) || options[0];
         if (!target) return;
 
         options.forEach((option) => option.classList.remove('selected'));
@@ -868,7 +904,17 @@ function initSettingsPage() {
         if (selectedText) selectedText.textContent = target.textContent || '';
     }
 
-    function handleSelectChange(value) {
+    function handleSelectChange(container, value) {
+        const settingKey = container?.dataset?.settingKey;
+        if (settingKey) {
+            localStorage.setItem(settingKey, value);
+            if (settingKey === 'spark_selected_model' && typeof window.setSelectedModel === 'function') {
+                window.setSelectedModel(value);
+            }
+            return;
+        }
+
+        // Theme dropdown
         if (value === 'system' || value === 'dark' || value === 'light') {
             applyThemeSelection(value);
             return;
@@ -881,6 +927,22 @@ function initSettingsPage() {
     }
 
     selectContainers.forEach((container) => {
+        const settingKey = container.dataset.settingKey;
+        if (settingKey) {
+            let defaultValue = '';
+            if (settingKey === 'spark_context_window') defaultValue = '2048';
+            else if (settingKey === 'spark_max_tokens') defaultValue = '2048';
+            else if (settingKey === 'spark_history_window_size') defaultValue = '16';
+            else if (settingKey === 'spark_selected_model') defaultValue = '';
+
+            const saved = localStorage.getItem(settingKey) || defaultValue;
+            if (saved) {
+                setSelectValue(container, saved);
+            }
+        } else if (container.querySelector('.custom-option[data-value="dark"]')) {
+            setSelectValue(container, getThemeSelection());
+        }
+
         const trigger = container.querySelector('.custom-select-trigger');
         const options = Array.from(container.querySelectorAll('.custom-option'));
 
@@ -898,13 +960,9 @@ function initSettingsPage() {
                 if (!value) return;
                 setSelectValue(container, value);
                 container.classList.remove('open');
-                handleSelectChange(value);
+                handleSelectChange(container, value);
             });
         });
-
-        if (container.querySelector('.custom-option[data-value="dark"]')) {
-            setSelectValue(container, getThemeSelection());
-        }
     });
 
     const modelContainer = document.getElementById('settings-model-container');
@@ -927,7 +985,7 @@ function initSettingsPage() {
                 opt.addEventListener('click', () => {
                     setSelectValue(modelContainer, modelId);
                     modelContainer.classList.remove('open');
-                    handleSelectChange(modelId);
+                    handleSelectChange(modelContainer, modelId);
                 });
 
                 optionsContainer.appendChild(opt);
@@ -936,6 +994,96 @@ function initSettingsPage() {
             setSelectValue(modelContainer, currentModel);
         });
     }
+
+    // Temperature slider & live badge
+    const tempSlider = document.getElementById('temp-slider');
+    const tempBadge = document.getElementById('temp-value-badge');
+    if (tempSlider && tempBadge) {
+        const savedTemp = localStorage.getItem('spark_temperature') || '0.70';
+        const numTemp = parseFloat(savedTemp);
+        const formatted = (!isNaN(numTemp) && numTemp >= 0.0 && numTemp <= 2.0 ? numTemp : 0.70).toFixed(2);
+        tempSlider.value = formatted;
+        tempBadge.textContent = formatted;
+
+        tempSlider.addEventListener('input', () => {
+            const val = parseFloat(tempSlider.value).toFixed(2);
+            tempBadge.textContent = val;
+            localStorage.setItem('spark_temperature', val);
+        });
+    }
+
+    // Deep Thinking toggle in Settings
+    const thinkingToggle = document.getElementById('toggle-thinking');
+    if (thinkingToggle) {
+        const isEnabled = typeof window.isThinkingEnabled === 'function'
+            ? window.isThinkingEnabled()
+            : localStorage.getItem('spark_enable_thinking') === 'true';
+        thinkingToggle.checked = isEnabled;
+        thinkingToggle.addEventListener('change', () => {
+            if (typeof window.setThinkingEnabled === 'function') {
+                window.setThinkingEnabled(thinkingToggle.checked);
+            } else {
+                localStorage.setItem('spark_enable_thinking', thinkingToggle.checked ? 'true' : 'false');
+            }
+        });
+    }
+
+    // Hint "?" toggle buttons
+    const hintButtons = document.querySelectorAll('.hint-btn');
+    hintButtons.forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const targetId = btn.getAttribute('data-hint');
+            if (!targetId) return;
+            const banner = document.getElementById(targetId);
+            if (!banner) return;
+
+            const isCurrentlyHidden = banner.classList.contains('hidden');
+            if (isCurrentlyHidden) {
+                banner.classList.remove('hidden');
+                btn.classList.add('active');
+            } else {
+                banner.classList.add('hidden');
+                btn.classList.remove('active');
+            }
+        });
+    });
+
+    // Clear All Chats button
+    const clearChatsBtn = document.querySelector('.setting-card .btn.btn-danger');
+    if (clearChatsBtn) {
+        clearChatsBtn.addEventListener('click', () => {
+            if (confirm('Are you sure you want to delete all chat history? This cannot be undone.')) {
+                if (typeof window.clearAllChatSessions === 'function') {
+                    window.clearAllChatSessions();
+                } else {
+                    localStorage.removeItem('spark_chat_sessions');
+                    localStorage.removeItem('spark_active_session_id');
+                    localStorage.removeItem('spark_chat_history');
+                }
+                alert('All chat history cleared.');
+            }
+        });
+    }
+
+    const systemRow = document.getElementById('system-instructions-row');
+    const previewBox = document.getElementById('system-instructions-preview');
+    const previewText = document.getElementById('system-instructions-text');
+
+    systemRow?.addEventListener('click', async () => {
+        if (!previewBox) return;
+        const isCurrentlyHidden = previewBox.style.display === 'none';
+        if (isCurrentlyHidden) {
+            previewBox.style.display = 'block';
+            if (typeof window.fetchSystemPrompt === 'function') {
+                const prompt = await window.fetchSystemPrompt();
+                if (previewText) previewText.textContent = prompt || '(Empty system_prompt.txt)';
+            }
+        } else {
+            previewBox.style.display = 'none';
+        }
+    });
 
     document.addEventListener('click', () => {
         selectContainers.forEach((container) => container.classList.remove('open'));
