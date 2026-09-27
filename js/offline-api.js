@@ -42,8 +42,8 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 4000) {
     return fetch(url, { ...options, signal }).finally(() => clearTimeout(timer));
 }
 
-function deriveTitle(text) {
-    if (!text) return 'New Conversation';
+function deriveTitle(text, hasImages = false) {
+    if (!text) return hasImages ? 'Image Conversation' : 'New Conversation';
     let clean = String(text)
         .replace(/[\r\n]+/g, ' ')
         .replace(/[#*_`~]/g, '')
@@ -51,7 +51,7 @@ function deriveTitle(text) {
     if (clean.length > 36) {
         clean = clean.substring(0, 36).trim() + '...';
     }
-    return clean || 'New Conversation';
+    return clean || (hasImages ? 'Image Conversation' : 'New Conversation');
 }
 
 /* ==================== MULTI-SESSION PERSISTENCE ==================== */
@@ -98,10 +98,44 @@ function getChatSessions() {
 }
 
 function saveChatSessions(sessions) {
+    if (!Array.isArray(sessions)) return;
     try {
         localStorage.setItem(STORAGE_KEYS.sessions, JSON.stringify(sessions));
     } catch (e) {
-        console.warn('Failed to save chat sessions:', e);
+        console.warn('Failed to save chat sessions (quota exceeded?), attempting cleanup:', e);
+        try {
+            // Level 1: Strip base64 images from all non-active / older sessions
+            const pruned = sessions.map(sess => {
+                if (sess.id === activeSessionId) return sess;
+                return {
+                    ...sess,
+                    messages: (sess.messages || []).map(m => {
+                        if (m.images && m.images.length > 0) {
+                            return { ...m, images: [] };
+                        }
+                        return m;
+                    })
+                };
+            });
+            localStorage.setItem(STORAGE_KEYS.sessions, JSON.stringify(pruned));
+        } catch (e2) {
+            console.warn('Level 1 cleanup failed, attempting Level 2 cleanup:', e2);
+            try {
+                // Level 2: Strip base64 images from all sessions completely, keeping text
+                const prunedAll = sessions.map(sess => ({
+                    ...sess,
+                    messages: (sess.messages || []).map(m => {
+                        if (m.images && m.images.length > 0) {
+                            return { ...m, images: [] };
+                        }
+                        return m;
+                    })
+                }));
+                localStorage.setItem(STORAGE_KEYS.sessions, JSON.stringify(prunedAll));
+            } catch (e3) {
+                console.error('Critical: LocalStorage full even after stripping all images', e3);
+            }
+        }
     }
 }
 
@@ -208,7 +242,8 @@ function saveActiveSessionMessages() {
     if (!currentSession) {
         // Auto-create session if sending a message from fresh state
         const firstUser = conversationHistory.find(m => m.role === 'user');
-        const title = firstUser ? deriveTitle(firstUser.content) : 'New Conversation';
+        const hasImages = firstUser && Array.isArray(firstUser.images) && firstUser.images.length > 0;
+        const title = firstUser ? deriveTitle(firstUser.content, hasImages) : 'New Conversation';
         currentSession = {
             id: activeSessionId || ('chat-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7)),
             title: title,
@@ -232,7 +267,8 @@ function saveActiveSessionMessages() {
         // Update title if it was default
         if (currentSession.title === 'New Conversation') {
             const firstUser = conversationHistory.find(m => m.role === 'user');
-            if (firstUser) currentSession.title = deriveTitle(firstUser.content);
+            const hasImages = firstUser && Array.isArray(firstUser.images) && firstUser.images.length > 0;
+            if (firstUser) currentSession.title = deriveTitle(firstUser.content, hasImages);
         }
     }
 
@@ -319,16 +355,26 @@ async function fetchAvailableModels() {
         }, 4000);
         if (res.ok) {
             const json = await res.json();
-            const models = (json.data || []).map(m => m.id).filter(Boolean);
-            if (models.length > 0) {
-                availableModels = models;
-                if (!currentSelectedModel || !models.includes(currentSelectedModel)) {
+            const rawModels = (json.data || []).map(m => m.id).filter(Boolean);
+            const filtered = [];
+            const seen = new Set();
+            for (const id of rawModels) {
+                if (/mmproj/i.test(id)) continue;
+                const clean = id.replace(/\.gguf$/i, '');
+                if (!seen.has(clean)) {
+                    seen.add(clean);
+                    filtered.push(id);
+                }
+            }
+            if (filtered.length > 0) {
+                availableModels = filtered;
+                if (!currentSelectedModel || !filtered.includes(currentSelectedModel)) {
                     // Default to 2B if available, otherwise first model
-                    const preferred = models.find(m => /2B/i.test(m)) || models[0];
+                    const preferred = filtered.find(m => /2B/i.test(m)) || filtered[0];
                     currentSelectedModel = preferred;
                     localStorage.setItem(STORAGE_KEYS.selectedModel, currentSelectedModel);
                 }
-                return models;
+                return filtered;
             }
         }
     } catch (e) {
@@ -413,7 +459,7 @@ function setThinkingEnabled(enabled) {
 function getHistoryWindowSize() {
     const saved = localStorage.getItem(SETTINGS_STORAGE_KEYS.historyWindowSize);
     const parsed = parseInt(saved, 10);
-    return (!isNaN(parsed) && parsed >= 2 && parsed <= 64) ? parsed : 16;
+    return (!isNaN(parsed) && parsed >= 2 && parsed <= 64) ? parsed : 24;
 }
 
 function getMaxTokens() {
@@ -431,7 +477,7 @@ function getTemperature() {
 function getContextWindow() {
     const saved = localStorage.getItem(SETTINGS_STORAGE_KEYS.contextWindow);
     const parsed = parseInt(saved, 10);
-    return (!isNaN(parsed) && parsed >= 512 && parsed <= 32768) ? parsed : 2048;
+    return (!isNaN(parsed) && parsed >= 512 && parsed <= 32768) ? parsed : 4096;
 }
 
 async function buildRequestMessages(history) {
@@ -463,8 +509,87 @@ async function buildRequestMessages(history) {
         content: systemPrompt
     });
 
-    // 2. Add user & assistant chat messages
-    requestMessages.push(...recentHistory);
+    // 3. Find the most recent user turn that has attached images
+    let lastImageUserIdx = -1;
+    for (let i = recentHistory.length - 1; i >= 0; i--) {
+        const item = recentHistory[i];
+        if (item && item.role === 'user' && Array.isArray(item.images) && item.images.length > 0) {
+            lastImageUserIdx = i;
+            break;
+        }
+    }
+
+    // 4. Clean and format history turns
+    for (let i = 0; i < recentHistory.length; i++) {
+        const msg = recentHistory[i];
+        if (!msg || typeof msg !== 'object') continue;
+
+        if (msg.role === 'assistant') {
+            // Strip any <think>...</think> internal blocks from previous assistant messages
+            // This prevents Qwen's chat template from remaining in thinking state and yielding blank replies
+            let cleanAssistant = String(msg.content || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+            if (!cleanAssistant) {
+                // If model only had reasoning, remove the tags but keep the text
+                cleanAssistant = String(msg.content || '').replace(/<\/?think>/gi, '').trim() || 'I understand.';
+            }
+            requestMessages.push({
+                role: "assistant",
+                content: cleanAssistant
+            });
+        } else if (msg.role === 'user') {
+            const hasImages = Array.isArray(msg.images) && msg.images.length > 0;
+            const textContent = String(msg.content || '').trim();
+
+            if (hasImages) {
+                // Only send full base64 images for the most recent image-bearing user turn
+                // Older image turns include a text summary so we don't re-transmit 1024 vision tokens every turn
+                if (i === lastImageUserIdx) {
+                    const parts = [];
+                    if (textContent) {
+                        parts.push({ type: "text", text: textContent });
+                    } else {
+                        parts.push({ type: "text", text: "Please describe or analyze this image." });
+                    }
+                    msg.images.forEach(imgUrl => {
+                        parts.push({
+                            type: "image_url",
+                            image_url: {
+                                url: imgUrl
+                            }
+                        });
+                    });
+                    requestMessages.push({
+                        role: "user",
+                        content: parts
+                    });
+                } else {
+                    const fallbackText = textContent 
+                        ? `[User previously attached an image with question]: ${textContent}`
+                        : `[User previously attached an image in this conversation]`;
+                    requestMessages.push({
+                        role: "user",
+                        content: fallbackText
+                    });
+                }
+            } else {
+                requestMessages.push({
+                    role: "user",
+                    content: textContent || ''
+                });
+            }
+        }
+    }
+
+    // 5. When Thinking is DISABLED:
+    // Append the assistant prefill '</think>' at the very end of messages!
+    // This tells Qwen's template that thinking has already concluded, completely bypassing
+    // chain-of-thought generation and giving instantaneous (<0.3s) replies with zero waiting!
+    if (!isThinkingEnabled()) {
+        requestMessages.push({
+            role: "assistant",
+            content: "</think>"
+        });
+    }
 
     return requestMessages;
 }
@@ -473,13 +598,18 @@ async function buildRequestMessages(history) {
  * Main function to fetch and stream response from the API
  * Directly uses the selected raw model name from models/
  */
-async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
+async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback, attachedImages = []) {
     const normalizedMessage = String(userMessage || '').trim();
-    if (!normalizedMessage) {
+    const hasImages = Array.isArray(attachedImages) && attachedImages.length > 0;
+    if (!normalizedMessage && !hasImages) {
         uiUpdateCallback('[System Error]: Empty message cannot be sent.', true, false);
         return;
     }
-    conversationHistory.push({ role: "user", content: normalizedMessage });
+    conversationHistory.push({
+        role: "user",
+        content: normalizedMessage,
+        images: hasImages ? [...attachedImages] : []
+    });
     saveActiveSessionMessages();
 
     const apiBase = resolveApiBase();
@@ -497,7 +627,7 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
     };
 
     if (!isThinkingEnabled()) {
-        // Hard-stop Qwen internal chain-of-thought to reply immediately without delay
+        // Stop reasoning budget in inference backend
         requestBody.reasoning_budget = 0;
         requestBody.chat_template_kwargs = { reasoning: false };
     }
@@ -537,6 +667,7 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder('utf-8');
         let buffer = "";
+        let hasStrippedPrefill = false;
 
         while (true) {
             const { done, value } = await reader.read();
@@ -558,16 +689,25 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
                         if (data.choices && data.choices[0] && data.choices[0].delta) {
                             const delta = data.choices[0].delta;
 
-                            // Handle Qwen 3.5 reasoning tokens
-                            if (delta.reasoning_content) {
+                            // Handle Qwen 3.5 reasoning tokens ONLY when deep thinking is enabled
+                            if (delta.reasoning_content && isThinkingEnabled()) {
                                 aiReasoning += delta.reasoning_content;
                                 uiUpdateCallback(delta.reasoning_content, false, true);
                             }
 
                             // Handle standard message content
                             if (delta.content) {
-                                aiContent += delta.content;
-                                uiUpdateCallback(delta.content, false, false);
+                                let chunk = delta.content;
+                                if (!hasStrippedPrefill && !isThinkingEnabled()) {
+                                    chunk = chunk.replace(/^<\/think>\s*/i, '');
+                                    if (chunk.length > 0 || aiContent.length > 0) {
+                                        hasStrippedPrefill = true;
+                                    }
+                                }
+                                if (chunk) {
+                                    aiContent += chunk;
+                                    uiUpdateCallback(chunk, false, false);
+                                }
                             }
                         }
                     } catch (e) {
@@ -577,10 +717,15 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
             }
         }
 
+        // Clean any leading/trailing prefill traces from stored content
+        aiContent = aiContent.replace(/^<\/think>\s*/i, '').trim();
+
         // Combine reasoning and content for conversation history
         let fullRecord = aiContent;
-        if (aiReasoning) {
-            fullRecord = `<think>${aiReasoning}</think>\n\n` + aiContent;
+        if (isThinkingEnabled() && aiReasoning.trim()) {
+            fullRecord = `<think>${aiReasoning.trim()}</think>\n\n` + fullRecord;
+        } else if (!fullRecord && aiReasoning.trim()) {
+            fullRecord = aiReasoning.trim();
         }
 
         conversationHistory.push({ role: "assistant", content: fullRecord });
@@ -592,8 +737,12 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback) {
         if (error.name === 'AbortError') {
             console.log("Generation stopped by user.");
             if (aiContent || aiReasoning) {
-                let partial = aiContent;
-                if (aiReasoning) partial = `<think>${aiReasoning}</think>\n\n` + aiContent;
+                let partial = aiContent ? aiContent.trim() : '';
+                if (!partial && aiReasoning.trim()) {
+                    partial = aiReasoning.trim();
+                } else if (aiReasoning.trim()) {
+                    partial = `<think>${aiReasoning.trim()}</think>\n\n` + partial;
+                }
                 conversationHistory.push({ role: "assistant", content: partial });
                 saveActiveSessionMessages();
             }

@@ -46,7 +46,109 @@ function applyThemeSelection(selection) {
     }
 }
 
-// Marked.js Configuration with Code Highlighting & Copy Button
+// ==================== IMAGE ATTACHMENTS & LIGHTBOX HELPERS ====================
+
+function compressImage(file, maxDim = 1280, quality = 0.85) {
+    return new Promise((resolve, reject) => {
+        if (!file || !file.type.startsWith('image/')) {
+            return reject(new Error('File is not an image'));
+        }
+        if (file.type === 'image/svg+xml' || file.type === 'image/gif') {
+            const reader = new FileReader();
+            reader.onload = () => resolve({
+                id: 'img-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+                dataUrl: reader.result,
+                name: file.name,
+                type: file.type,
+                size: file.size
+            });
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                let width = img.width;
+                let height = img.height;
+                if (width > maxDim || height > maxDim) {
+                    if (width > height) {
+                        height = Math.round((height * maxDim) / width);
+                        width = maxDim;
+                    } else {
+                        width = Math.round((width * maxDim) / height);
+                        height = maxDim;
+                    }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                const outType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+                const dataUrl = canvas.toDataURL(outType, quality);
+                resolve({
+                    id: 'img-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+                    dataUrl: dataUrl,
+                    name: file.name,
+                    type: outType,
+                    size: Math.round(dataUrl.length * 0.75)
+                });
+            };
+            img.onerror = () => {
+                resolve({
+                    id: 'img-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+                    dataUrl: e.target.result,
+                    name: file.name,
+                    type: file.type,
+                    size: file.size
+                });
+            };
+            img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+function openImageLightbox(src, title = 'Image Preview') {
+    const lightbox = document.getElementById('image-lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
+    const lightboxTitle = document.getElementById('lightbox-title');
+    const downloadBtn = document.getElementById('lightbox-download-btn');
+    if (!lightbox || !lightboxImg) return;
+
+    lightboxImg.src = src;
+    if (lightboxTitle) lightboxTitle.textContent = title || 'Image Preview';
+    if (downloadBtn) {
+        downloadBtn.href = src;
+        const cleanName = (title ? String(title).replace(/[^a-z0-9_-]/gi, '_') : 'spark-image');
+        downloadBtn.download = cleanName + '.png';
+    }
+    lightbox.classList.remove('hidden');
+}
+
+function closeImageLightbox() {
+    const lightbox = document.getElementById('image-lightbox');
+    if (lightbox) lightbox.classList.add('hidden');
+}
+
+function downloadImage(src, filename = 'spark-image.png') {
+    const a = document.createElement('a');
+    a.href = src;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+window.openImageLightbox = openImageLightbox;
+window.closeImageLightbox = closeImageLightbox;
+window.downloadImage = downloadImage;
+
+// Marked.js Configuration with Code Highlighting, Copy Button & Image Rendering
 if (typeof marked !== 'undefined') {
     const renderer = new marked.Renderer();
     renderer.code = function (tokenOrCode, lang) {
@@ -78,6 +180,25 @@ if (typeof marked !== 'undefined') {
             }
         }
 
+        // Detect SVG vector art and render interactive preview
+        if (normalizedLanguage === 'svg' || (code.trim().startsWith('<svg') && code.trim().endsWith('</svg>'))) {
+            return `
+            <div class="svg-preview-wrapper">
+                <div class="svg-preview-header">
+                    <span>Generated Vector Graphic (SVG)</span>
+                    <div class="svg-preview-actions">
+                        <button type="button" class="svg-toggle-btn" onclick="const codeEl = this.closest('.svg-preview-wrapper').querySelector('.code-wrapper'); codeEl.style.display = codeEl.style.display === 'none' ? 'block' : 'none';">Toggle Code</button>
+                        <button type="button" class="copy-btn">Copy</button>
+                    </div>
+                </div>
+                <div class="svg-render-canvas">${code}</div>
+                <div class="code-wrapper" style="display: none; border-top: 1px solid var(--border-color); border-radius: 0;">
+                    <pre><code class="hljs language-xml">${highlightedCode}</code></pre>
+                </div>
+            </div>
+            `;
+        }
+
         return `
         <div class="code-wrapper">
             <div class="code-header">
@@ -85,6 +206,43 @@ if (typeof marked !== 'undefined') {
                 <button class="copy-btn" aria-label="Copy code block">Copy</button>
             </div>
             <pre><code class="hljs language-${displayLanguage}">${highlightedCode}</code></pre>
+        </div>
+        `;
+    };
+
+    // AI Generated Image rendering
+    renderer.image = function (tokenOrHref, title, text) {
+        let href, alt;
+        if (typeof tokenOrHref === 'object' && tokenOrHref !== null) {
+            href = tokenOrHref.href || '';
+            alt = tokenOrHref.text || tokenOrHref.title || 'Generated image';
+        } else {
+            href = tokenOrHref || '';
+            alt = text || title || 'Generated image';
+        }
+
+        const safeHref = escapeHtml(href);
+        const safeAlt = escapeHtml(alt);
+        const safeTitle = safeAlt.replace(/'/g, "\\'");
+
+        return `
+        <div class="ai-generated-image-card">
+            <div class="ai-image-wrap" onclick="openImageLightbox('${safeHref}', '${safeTitle}')">
+                <img src="${safeHref}" alt="${safeAlt}" class="ai-generated-img" loading="lazy" />
+                <div class="ai-image-overlay">
+                    <span class="ai-image-zoom-hint">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                        Click to Expand
+                    </span>
+                </div>
+            </div>
+            <div class="ai-image-footer">
+                <span class="ai-image-caption">${safeAlt}</span>
+                <button type="button" class="ai-image-download-btn" onclick="downloadImage('${safeHref}', 'generated-image.png')" title="Download Image">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                    <span>Download</span>
+                </button>
+            </div>
         </div>
         `;
     };
@@ -145,7 +303,8 @@ function scheduleRender() {
         renderScheduled = false;
         if (window.aiBubble) {
             let combined = '';
-            if (currentReasoningText) {
+            const thinkingOn = typeof window.isThinkingEnabled !== 'function' || window.isThinkingEnabled();
+            if (currentReasoningText && thinkingOn) {
                 combined += `<think>${currentReasoningText}</think>\n\n`;
             }
             combined += currentContentText;
@@ -223,6 +382,18 @@ function initChatPage() {
     const welcomeScreen = document.getElementById('welcome-screen');
     const mobileNav = document.querySelector('.mobile-bottom-nav');
     const newChatBtn = document.querySelector('.new-chat-btn');
+    const attachmentsTray = document.getElementById('attachments-preview-tray');
+    const imageFileInput = document.getElementById('image-file-input');
+    const attachImgBtn = document.getElementById('attach-img-btn');
+    const inputContainer = document.querySelector('.clean-input-container');
+    let pendingAttachments = [];
+
+    function updateSendBtnState() {
+        if (isGenerating) return;
+        const hasText = chatInput.value.trim().length > 0;
+        const hasAttachments = pendingAttachments.length > 0;
+        sendBtn.disabled = !hasText && !hasAttachments;
+    }
 
     // Pre-populate model pill immediately from cache if available
     const cachedModel = localStorage.getItem('spark_selected_model') || (typeof window.getSelectedModel === 'function' ? window.getSelectedModel() : '');
@@ -292,23 +463,45 @@ function initChatPage() {
         }
     }
 
-    function appendMessage(text, sender) {
+    function appendMessage(text, sender, images = []) {
         const row = document.createElement('div');
         row.className = `message-row ${sender}`;
 
-        const bubble = document.createElement('div');
-        bubble.className = 'message-bubble';
-        bubble.style.whiteSpace = 'normal';
-
-        if (sender === 'ai') {
-            bubble.innerHTML = renderMarkdownSafe(text || '');
-        } else {
-            bubble.textContent = String(text || '');
-        }
-
         const content = document.createElement('div');
         content.className = 'message-content';
-        content.appendChild(bubble);
+
+        // Attached images for user message
+        if (sender === 'user' && Array.isArray(images) && images.length > 0) {
+            const attachContainer = document.createElement('div');
+            attachContainer.className = 'message-attachments-container';
+            images.forEach((imgSrc, idx) => {
+                const imgWrap = document.createElement('div');
+                imgWrap.className = 'message-attachment-thumb';
+                const imgEl = document.createElement('img');
+                imgEl.src = imgSrc;
+                imgEl.alt = `Attached Image ${idx + 1}`;
+                imgWrap.appendChild(imgEl);
+                imgWrap.addEventListener('click', () => {
+                    openImageLightbox(imgSrc, `Attached Image ${idx + 1}`);
+                });
+                attachContainer.appendChild(imgWrap);
+            });
+            content.appendChild(attachContainer);
+        }
+
+        let bubble = null;
+        if (text || sender === 'ai') {
+            bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            bubble.style.whiteSpace = 'normal';
+
+            if (sender === 'ai') {
+                bubble.innerHTML = renderMarkdownSafe(text || '');
+            } else {
+                bubble.textContent = String(text || '');
+            }
+            content.appendChild(bubble);
+        }
 
         if (sender === 'ai') {
             const avatar = document.createElement('div');
@@ -321,8 +514,7 @@ function initChatPage() {
         chatArea.appendChild(row);
         scrollToBottom();
 
-        if (sender === 'ai') return bubble;
-        return null;
+        return bubble;
     }
 
     function showTypingIndicator() {
@@ -354,6 +546,7 @@ function initChatPage() {
     function setGeneratingState(active) {
         isGenerating = active;
         chatInput.disabled = active;
+        if (attachImgBtn) attachImgBtn.disabled = active;
 
         if (active) {
             sendBtn.disabled = false;
@@ -364,7 +557,7 @@ function initChatPage() {
             sendBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"></path><path d="m21.854 2.147-10.94 10.939"></path></svg>`;
             sendBtn.title = 'Send Message';
             sendBtn.setAttribute('aria-label', 'Send message');
-            sendBtn.disabled = chatInput.value.trim().length === 0;
+            updateSendBtnState();
             chatInput.focus();
         }
     }
@@ -408,13 +601,17 @@ function initChatPage() {
 
         models.forEach((modelId) => {
             const cleanName = modelId.replace(/\.gguf$/i, '');
+            const isVision = /2b/i.test(cleanName) || /vision|vl/i.test(cleanName);
             const opt = document.createElement('div');
             opt.className = 'model-option' + (modelId === activeModel ? ' selected' : '');
             opt.dataset.value = modelId;
 
             opt.innerHTML = `
-                <span class="model-name">${escapeHtml(cleanName)}</span>
-                <span class="model-desc">${escapeHtml(cleanName)}.gguf</span>
+                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                    <span class="model-name">${escapeHtml(cleanName)}</span>
+                    ${isVision ? '<span style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 6px; background: rgba(99, 102, 241, 0.18); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.35);">Vision</span>' : ''}
+                </div>
+                <span class="model-desc">${escapeHtml(cleanName)}.gguf ${isVision ? '· Multimodal Active' : ''}</span>
             `;
 
             opt.addEventListener('click', () => {
@@ -534,7 +731,7 @@ function initChatPage() {
             if (message.role === 'assistant') {
                 appendMessage(message.content || '', 'ai');
             } else {
-                appendMessage(message.content || '', 'user');
+                appendMessage(message.content || '', 'user', message.images || []);
             }
         });
         scrollToBottom();
@@ -549,6 +746,8 @@ function initChatPage() {
         if (typeof window.setActiveSessionId === 'function') {
             window.setActiveSessionId(null);
         }
+        pendingAttachments = [];
+        renderAttachmentPreviews();
         hydrateChatHistory();
         renderSidebarHistory();
         setGeneratingState(false);
@@ -608,12 +807,18 @@ function initChatPage() {
         }
 
         const message = chatInput.value.trim();
-        if (!message) return;
+        const attachedImages = pendingAttachments.map(p => p.dataUrl);
+
+        if (!message && attachedImages.length === 0) return;
 
         hideWelcomeIfNeeded();
-        appendMessage(message, 'user');
+        appendMessage(message, 'user', attachedImages);
+
+        // Reset input and attachments
         chatInput.value = '';
         chatInput.style.height = 'auto';
+        pendingAttachments = [];
+        renderAttachmentPreviews();
 
         setGeneratingState(true);
         abortController = new AbortController();
@@ -647,7 +852,7 @@ function initChatPage() {
                         chatInput.value = message;
                         chatInput.focus();
                         chatInput.style.height = 'auto';
-                        sendBtn.disabled = false;
+                        updateSendBtnState();
                         errorBubble.closest('.message-row')?.remove();
                     };
                     errorBubble.appendChild(retryBtn);
@@ -677,17 +882,22 @@ function initChatPage() {
                 // Final flush render
                 if (window.aiBubble) {
                     let finalCombined = '';
-                    if (currentReasoningText) {
+                    const thinkingOn = typeof window.isThinkingEnabled !== 'function' || window.isThinkingEnabled();
+                    if (currentReasoningText && thinkingOn) {
                         finalCombined += `<think>${currentReasoningText}</think>\n\n`;
                     }
-                    finalCombined += currentContentText;
+                    if (!currentContentText.trim() && currentReasoningText.trim()) {
+                        finalCombined += currentReasoningText.trim();
+                    } else {
+                        finalCombined += currentContentText;
+                    }
                     window.aiBubble.innerHTML = renderMarkdownSafe(finalCombined);
                 }
                 setGeneratingState(false);
                 abortController = null;
                 renderSidebarHistory();
             }
-        });
+        }, attachedImages);
     }
 
     modelBtn?.addEventListener('click', (e) => {
@@ -704,8 +914,137 @@ function initChatPage() {
     chatInput.addEventListener('input', function () {
         this.style.height = 'auto';
         this.style.height = Math.min(this.scrollHeight, 150) + 'px';
-        if (!isGenerating) sendBtn.disabled = this.value.trim().length === 0;
+        updateSendBtnState();
         scrollToBottom();
+    });
+
+    function renderAttachmentPreviews() {
+        if (!attachmentsTray) return;
+        attachmentsTray.innerHTML = '';
+        if (pendingAttachments.length === 0) {
+            attachmentsTray.classList.add('hidden');
+            updateSendBtnState();
+            return;
+        }
+
+        attachmentsTray.classList.remove('hidden');
+        pendingAttachments.forEach((att) => {
+            const card = document.createElement('div');
+            card.className = 'attachment-preview-card';
+
+            const img = document.createElement('img');
+            img.src = att.dataUrl;
+            img.alt = att.name || 'Attachment';
+            card.appendChild(img);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'attachment-remove-btn';
+            removeBtn.title = 'Remove image';
+            removeBtn.setAttribute('aria-label', 'Remove image');
+            removeBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            `;
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                pendingAttachments = pendingAttachments.filter(p => p.id !== att.id);
+                renderAttachmentPreviews();
+            });
+
+            card.addEventListener('click', () => {
+                openImageLightbox(att.dataUrl, att.name || 'Attachment Preview');
+            });
+
+            card.appendChild(removeBtn);
+            attachmentsTray.appendChild(card);
+        });
+
+        updateSendBtnState();
+        scrollToBottom();
+    }
+
+    async function handleSelectedFiles(files) {
+        if (!files || files.length === 0) return;
+        const imageFiles = Array.from(files).filter(f => f.type && f.type.startsWith('image/'));
+        if (imageFiles.length === 0) return;
+
+        for (const file of imageFiles) {
+            try {
+                const compressed = await compressImage(file, 1280, 0.85);
+                pendingAttachments.push(compressed);
+            } catch (err) {
+                console.error('Error compressing attached image:', err);
+            }
+        }
+        renderAttachmentPreviews();
+    }
+
+    if (attachImgBtn && imageFileInput) {
+        attachImgBtn.addEventListener('click', () => {
+            imageFileInput.click();
+        });
+
+        imageFileInput.addEventListener('change', () => {
+            if (imageFileInput.files && imageFileInput.files.length > 0) {
+                handleSelectedFiles(imageFileInput.files);
+                imageFileInput.value = '';
+            }
+        });
+    }
+
+    // Drag and Drop support on input container
+    if (inputContainer) {
+        ['dragenter', 'dragover'].forEach(eventName => {
+            inputContainer.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                inputContainer.classList.add('drag-over');
+            });
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            inputContainer.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                inputContainer.classList.remove('drag-over');
+            });
+        });
+
+        inputContainer.addEventListener('drop', (e) => {
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                handleSelectedFiles(e.dataTransfer.files);
+            }
+        });
+    }
+
+    // Clipboard paste support (Ctrl+V with image in clipboard)
+    window.addEventListener('paste', (e) => {
+        if (!chatArea) return;
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        const imageFiles = [];
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type && items[i].type.startsWith('image/')) {
+                const file = items[i].getAsFile();
+                if (file) imageFiles.push(file);
+            }
+        }
+        if (imageFiles.length > 0) {
+            e.preventDefault();
+            handleSelectedFiles(imageFiles);
+        }
+    });
+
+    // Lightbox modal close listeners
+    const lightboxCloseBtn = document.getElementById('lightbox-close-btn');
+    const lightboxOverlay = document.getElementById('lightbox-backdrop');
+    lightboxCloseBtn?.addEventListener('click', closeImageLightbox);
+    lightboxOverlay?.addEventListener('click', closeImageLightbox);
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeImageLightbox();
     });
 
     chatInput.addEventListener('keydown', (e) => {
@@ -930,9 +1269,9 @@ function initSettingsPage() {
         const settingKey = container.dataset.settingKey;
         if (settingKey) {
             let defaultValue = '';
-            if (settingKey === 'spark_context_window') defaultValue = '2048';
+            if (settingKey === 'spark_context_window') defaultValue = '4096';
             else if (settingKey === 'spark_max_tokens') defaultValue = '2048';
-            else if (settingKey === 'spark_history_window_size') defaultValue = '16';
+            else if (settingKey === 'spark_history_window_size') defaultValue = '24';
             else if (settingKey === 'spark_selected_model') defaultValue = '';
 
             const saved = localStorage.getItem(settingKey) || defaultValue;

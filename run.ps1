@@ -1,6 +1,6 @@
 param (
     [int]$Port = 5000,
-    [int]$ContextSize = 2048,
+    [int]$ContextSize = 4096,
     [switch]$ForceCpu,
     [string]$Model = "models\Qwen3.5-2B-Q4_K_M.gguf"
 )
@@ -29,7 +29,13 @@ if ($ForceCpu -or -not (Test-Path $ServerExe)) {
 }
 
 Write-Host "[INFO] Starting server process on port $Port..." -ForegroundColor Cyan
-$serverArgs = "-m `"$Model`" --path . --port $Port --host 127.0.0.1 -c $ContextSize"
+$mmproj = Get-ChildItem "models" -Filter "*mmproj*.gguf" -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($mmproj) {
+    Write-Host "[INFO] Multimodal Vision Projector: $($mmproj.Name)" -ForegroundColor Magenta
+    $serverArgs = "-m `"$Model`" --mmproj `"$($mmproj.FullName)`" --path . --port $Port --host 127.0.0.1 -c $ContextSize"
+} else {
+    $serverArgs = "-m `"$Model`" --path . --port $Port --host 127.0.0.1 -c $ContextSize"
+}
 $proc = Start-Process -FilePath $ServerExe -ArgumentList $serverArgs -PassThru -NoNewWindow
 
 Write-Host "[INFO] Warming up model into memory..." -ForegroundColor Cyan
