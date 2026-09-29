@@ -101,7 +101,7 @@ def pair_models_with_mmproj(models, mmprojs):
             # Match by size token (e.g. 2b, 7b, 0.8b)
             for mp in mmprojs:
                 mp_base = os.path.basename(mp).lower()
-                for token in ('2b', '7b', '14b', '32b', '72b', '0.5b', '0.8b', '1.5b'):
+                for token in ('0.5b', '0.8b', '1.5b', '2b', '3b', '4b', '7b', '8b', '9b', '14b', '32b', '72b'):
                     if token in m_base and token in mp_base:
                         matched = mp
                         break
