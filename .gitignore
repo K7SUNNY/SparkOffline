@@ -48,3 +48,7 @@ models/
 *.ckpt
 *.onnx
 *.safetensors
+
+# Local development and auto-generated files
+ROADMAP.md
+models.ini
