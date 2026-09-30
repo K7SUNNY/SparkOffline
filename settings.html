@@ -60,8 +60,7 @@
             </div>
 
             <div class="new-chat-wrapper">
-                <button class="new-chat-btn" aria-label="New chat" title="New Chat"
-                    onclick="window.location.href='/';">
+                <button class="new-chat-btn" aria-label="New chat" title="New Chat">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
                         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M5 12h14"></path>
@@ -112,6 +111,23 @@
                 </a>
             </nav>
 
+            <!-- chat chat-history-section -->
+            <div class="chat-history-section fade-in-text">
+                <div class="history-label">Recent Chats</div>
+                <div class="sidebar-search-box">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        class="sidebar-search-icon">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.3-4.3"></path>
+                    </svg>
+                    <input type="text" id="sidebar-search-input" placeholder="Search chats..." class="sidebar-search-field" autocomplete="off" />
+                </div>
+                <div class="history-list" id="sidebar-history-list">
+                    <!-- Dynamically populated from chat sessions -->
+                </div>
+            </div>
+
             <div class="sidebar-footer">V2</div>
         </aside>
 
@@ -151,10 +167,10 @@
                         <div class="setting-card">
                             <div class="setting-row">
                                 <div class="profile-info">
-                                    <img src="assets/avatar.png" alt="Avatar" class="setting-avatar" loading="lazy">
+                                    <img id="settings-avatar-img" src="assets/avatar.png" alt="Avatar" class="setting-avatar" loading="lazy">
                                     <div class="profile-text">
-                                        <div class="setting-label">Guest User</div>
-                                        <div class="setting-desc">user@example.com</div>
+                                        <div id="settings-profile-name" class="setting-label">Guest User</div>
+                                        <div id="settings-profile-email" class="setting-desc">user@example.com</div>
                                     </div>
                                 </div>
                                 <button class="btn btn-secondary"
@@ -198,7 +214,7 @@
                                     <div class="setting-desc">Expand code snippets by default</div>
                                 </div>
                                 <label class="toggle-switch">
-                                    <input type="checkbox" checked>
+                                    <input type="checkbox" id="toggle-code-blocks" checked>
                                     <span class="slider"></span>
                                 </label>
                             </div>
@@ -445,9 +461,28 @@
                                     <div class="setting-desc">Save chats to this device</div>
                                 </div>
                                 <label class="toggle-switch">
-                                    <input type="checkbox" checked>
+                                    <input type="checkbox" id="toggle-chat-history" checked>
                                     <span class="slider"></span>
                                 </label>
+                            </div>
+                            <div class="setting-divider"></div>
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">Export Data Backup</div>
+                                    <div class="setting-desc">Download conversations, memories, and profile as JSON</div>
+                                </div>
+                                <button type="button" id="export-backup-btn" class="btn btn-secondary">Export JSON</button>
+                            </div>
+                            <div class="setting-divider"></div>
+                            <div class="setting-row">
+                                <div>
+                                    <div class="setting-label">Restore Data Backup</div>
+                                    <div class="setting-desc">Import and merge chats and memories from JSON</div>
+                                </div>
+                                <div>
+                                    <input type="file" id="import-backup-input" accept=".json" style="display: none;">
+                                    <button type="button" id="import-backup-btn" class="btn btn-secondary">Import JSON</button>
+                                </div>
                             </div>
                             <div class="setting-divider"></div>
                             <div class="setting-row">
@@ -455,7 +490,7 @@
                                     <div class="setting-label text-danger">Clear All Chats</div>
                                     <div class="setting-desc">Permanently remove history</div>
                                 </div>
-                                <button class="btn btn-danger">Clear</button>
+                                <button type="button" id="clear-chats-btn" class="btn btn-danger">Clear</button>
                             </div>
                         </div>
                     </div>

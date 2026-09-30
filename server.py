@@ -126,12 +126,14 @@ def generate_router_preset(base_dir, models, paired_mmprojs, ctx_size=4096):
     """
     Generates an INI preset file for llama-server router mode.
     Explicitly binds each model with its multimodal projector (mmproj) if available.
+    Sets mmproj-device = none so vision projector executes stably on CPU without Vulkan crashes.
     """
     ini_path = os.path.join(base_dir, "models.ini")
     lines = [
         "version = 1\n",
         "[*]",
-        f"ctx-size = {ctx_size}\n"
+        f"ctx-size = {ctx_size}",
+        "mmproj-device = none\n"
     ]
 
     for model_path in models:
@@ -147,6 +149,7 @@ def generate_router_preset(base_dir, models, paired_mmprojs, ctx_size=4096):
         lines.append(f"model = {rel_model_path}")
         if rel_mmproj_path:
             lines.append(f"mmproj = {rel_mmproj_path}")
+            lines.append("mmproj-device = none")
         lines.append("")
 
         # Filename alias section (e.g. Qwen3.5-2B-Q4_K_M.gguf)
@@ -155,6 +158,7 @@ def generate_router_preset(base_dir, models, paired_mmprojs, ctx_size=4096):
             lines.append(f"model = {rel_model_path}")
             if rel_mmproj_path:
                 lines.append(f"mmproj = {rel_mmproj_path}")
+                lines.append("mmproj-device = none")
             lines.append("")
 
     with open(ini_path, "w", encoding="utf-8") as f:
@@ -162,13 +166,13 @@ def generate_router_preset(base_dir, models, paired_mmprojs, ctx_size=4096):
 
     return ini_path
 
-def find_server_binary(base_dir):
+def find_server_binary(base_dir, force_cpu=False):
     """Detects Vulkan GPU accelerated server, falls back to CPU."""
     vulkan_exe = os.path.join(base_dir, "bin", "llama-vulkan", "llama-server.exe")
     cpu_exe = os.path.join(base_dir, "bin", "llama", "llama-server.exe")
 
-    if os.path.isfile(vulkan_exe):
-        return vulkan_exe, "Vulkan GPU Acceleration"
+    if not force_cpu and os.path.isfile(vulkan_exe):
+        return vulkan_exe, "Vulkan GPU Acceleration (Vision CPU Safety Guard)"
     elif os.path.isfile(cpu_exe):
         return cpu_exe, "Universal CPU Engine"
     
@@ -206,6 +210,7 @@ def main():
     host = os.getenv("SPARK_HOST", "127.0.0.1")
     port = int(os.getenv("SPARK_PORT", "5000"))
     ctx_size = int(os.getenv("SPARK_CTX", "4096"))
+    force_cpu = "--cpu" in sys.argv or os.getenv("SPARK_ENGINE", "").lower() == "cpu"
 
     print("=" * 60)
     print("        SparkV2 Offline - Local AI Server")
@@ -239,7 +244,7 @@ def main():
             print(f"       * {os.path.basename(mp)} ({mp_size:.1f} MB)")
 
     # 2. Locate Inference Engine
-    server_exe, engine_desc = find_server_binary(base_dir)
+    server_exe, engine_desc = find_server_binary(base_dir, force_cpu=force_cpu)
     if not server_exe:
         print(f"\n[ERROR] Inference engine not found in '{os.path.join(base_dir, 'bin')}'!")
         print("Please ensure bin/llama-vulkan or bin/llama exists.")
@@ -258,13 +263,14 @@ def main():
     cmd = [
         server_exe,
         "--models-preset", preset_ini,
-        "--models-dir", models_dir,
         "--models-max", "1",
         "--path", base_dir,
         "--port", str(port),
         "--host", host,
         "-c", str(ctx_size)
     ]
+    if "vulkan" in server_exe.lower():
+        cmd.extend(["-mmdev", "none"])
 
     if "--test" in sys.argv:
         print("[TEST] Verified model directory and engine binary. Ready to run.")

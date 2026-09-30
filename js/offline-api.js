@@ -99,6 +99,9 @@ function getChatSessions() {
 
 function saveChatSessions(sessions) {
     if (!Array.isArray(sessions)) return;
+    if (localStorage.getItem('spark_enable_history') === 'false') {
+        return;
+    }
     try {
         localStorage.setItem(STORAGE_KEYS.sessions, JSON.stringify(sessions));
     } catch (e) {
@@ -393,15 +396,63 @@ function setSelectedModel(modelId) {
     console.log('Selected model set to:', modelId);
 }
 
-function saveMemoryEntry(userMessage, assistantMessage) {
+function getActiveMemories(limit = 10) {
+    try {
+        const raw = localStorage.getItem(STORAGE_KEYS.memory);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+
+        // Prioritize custom/manual memories first, then learned conversation memories
+        const manual = parsed.filter(m => m && (m.type === 'manual' || !m.assistant));
+        const auto = parsed.filter(m => m && m.type !== 'manual' && m.assistant);
+
+        const combined = [...manual, ...auto];
+        const results = [];
+        const seen = new Set();
+
+        for (const item of combined) {
+            const text = String(item.user || item.text || '').trim();
+            if (!text) continue;
+            const normalized = text.toLowerCase();
+            if (!seen.has(normalized)) {
+                seen.add(normalized);
+                results.push(text);
+            }
+            if (results.length >= limit) break;
+        }
+        return results;
+    } catch (e) {
+        console.warn('Failed to retrieve active memories:', e);
+        return [];
+    }
+}
+
+function saveMemoryEntry(userMessage, assistantMessage, type = 'auto') {
+    const userClean = String(userMessage || '').trim();
+    if (!userClean) return;
+
+    // Filter out trivial greetings, very short queries, or slash commands from auto-memory
+    if (type === 'auto') {
+        if (userClean.length < 15) return;
+        if (/^(hi|hello|hey|yo|thanks|thank you|ok|okay|bye|goodbye|what's up|test)\b/i.test(userClean)) return;
+        if (userClean.startsWith('/')) return;
+    }
+
     try {
         const raw = localStorage.getItem(STORAGE_KEYS.memory);
         const parsed = JSON.parse(raw || '[]');
         const memory = Array.isArray(parsed) ? parsed : [];
+        
+        // Avoid duplicate memories
+        const exists = memory.some(m => (m.user && m.user.toLowerCase() === userClean.toLowerCase()));
+        if (exists) return;
+
         memory.unshift({
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            user: userMessage,
-            assistant: assistantMessage || '',
+            id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            user: userClean,
+            assistant: assistantMessage ? String(assistantMessage).slice(0, 300) : '',
+            type: type,
             createdAt: new Date().toISOString()
         });
         localStorage.setItem(STORAGE_KEYS.memory, JSON.stringify(memory.slice(0, 500)));
@@ -409,6 +460,7 @@ function saveMemoryEntry(userMessage, assistantMessage) {
         console.warn('Failed to store memory entry:', error);
     }
 }
+
 
 let cachedSystemPrompt = null;
 let lastPromptFetchTime = 0;
@@ -502,6 +554,14 @@ async function buildRequestMessages(history) {
         systemPrompt += "\n\n[Instruction: Deep Thinking Mode ENABLED]\nYou should think step-by-step and provide detailed reasoning inside <think>...</think> tags before providing your final answer.";
     } else {
         systemPrompt += "\n\n[Instruction: Fast Response Mode - Thinking DISABLED]\nDo NOT use <think> tags, internal monologue, or chain-of-thought reasoning. Answer directly, concisely, and immediately with the final response only.";
+    }
+
+    // 2b. Inject persistent user memories and preferences
+    const activeMemories = getActiveMemories(10);
+    if (activeMemories.length > 0) {
+        systemPrompt += "\n\n[User Memories & Preferences]:\n" +
+            "The following facts, preferences, and details have been remembered about the user. Use them naturally when relevant:\n" +
+            activeMemories.map(m => `• ${m}`).join("\n");
     }
 
     requestMessages.push({
@@ -598,23 +658,30 @@ async function buildRequestMessages(history) {
  * Main function to fetch and stream response from the API
  * Directly uses the selected raw model name from models/
  */
-async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback, attachedImages = []) {
+async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback, attachedImages = [], options = {}) {
+    const isRegen = options && options.isRegeneration === true;
     const normalizedMessage = String(userMessage || '').trim();
     const hasImages = Array.isArray(attachedImages) && attachedImages.length > 0;
-    if (!normalizedMessage && !hasImages) {
-        uiUpdateCallback('[System Error]: Empty message cannot be sent.', true, false);
-        return;
+
+    if (!isRegen) {
+        if (!normalizedMessage && !hasImages) {
+            uiUpdateCallback('[System Error]: Empty message cannot be sent.', true, false);
+            return;
+        }
+        conversationHistory.push({
+            role: "user",
+            content: normalizedMessage,
+            images: hasImages ? [...attachedImages] : []
+        });
+        saveActiveSessionMessages();
     }
-    conversationHistory.push({
-        role: "user",
-        content: normalizedMessage,
-        images: hasImages ? [...attachedImages] : []
-    });
-    saveActiveSessionMessages();
 
     const apiBase = resolveApiBase();
     let aiContent = "";
     let aiReasoning = "";
+    const startTime = performance.now();
+    let firstTokenTime = null;
+    let tokenCount = 0;
 
     const messages = await buildRequestMessages(conversationHistory);
 
@@ -691,6 +758,8 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback, att
 
                             // Handle Qwen 3.5 reasoning tokens ONLY when deep thinking is enabled
                             if (delta.reasoning_content && isThinkingEnabled()) {
+                                if (!firstTokenTime) firstTokenTime = performance.now();
+                                tokenCount += 1;
                                 aiReasoning += delta.reasoning_content;
                                 uiUpdateCallback(delta.reasoning_content, false, true);
                             }
@@ -705,6 +774,8 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback, att
                                     }
                                 }
                                 if (chunk) {
+                                    if (!firstTokenTime) firstTokenTime = performance.now();
+                                    tokenCount += 1;
                                     aiContent += chunk;
                                     uiUpdateCallback(chunk, false, false);
                                 }
@@ -728,10 +799,20 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback, att
             fullRecord = aiReasoning.trim();
         }
 
+        const totalSec = (performance.now() - startTime) / 1000;
+        const ttftSec = firstTokenTime ? ((firstTokenTime - startTime) / 1000).toFixed(2) : '0.00';
+        const tokPerSec = totalSec > 0 ? (tokenCount / totalSec).toFixed(1) : '0.0';
+        const perfStats = {
+            ttft: ttftSec,
+            tokPerSec: tokPerSec,
+            totalTokens: tokenCount,
+            totalSec: totalSec.toFixed(1)
+        };
+
         conversationHistory.push({ role: "assistant", content: fullRecord });
         saveActiveSessionMessages();
         saveMemoryEntry(normalizedMessage, fullRecord);
-        uiUpdateCallback("", true, false);
+        uiUpdateCallback("", true, false, perfStats);
 
     } catch (error) {
         if (error.name === 'AbortError') {
@@ -777,6 +858,33 @@ window.clearConversationHistory = function () {
     conversationHistory = [];
     saveActiveSessionMessages();
 };
+window.removeTurnAtIndex = function (index) {
+    if (index >= 0 && index < conversationHistory.length) {
+        const isUser = conversationHistory[index]?.role === 'user';
+        if (isUser && conversationHistory[index + 1]?.role === 'assistant') {
+            conversationHistory.splice(index, 2);
+        } else {
+            conversationHistory.splice(index, 1);
+        }
+        saveActiveSessionMessages();
+    }
+};
+window.popLastAssistantTurn = function () {
+    if (conversationHistory.length > 0 && conversationHistory[conversationHistory.length - 1].role === 'assistant') {
+        const popped = conversationHistory.pop();
+        saveActiveSessionMessages();
+        return popped;
+    }
+    return null;
+};
+window.truncateHistoryAt = function (index) {
+    if (index >= 0 && index <= conversationHistory.length) {
+        conversationHistory = conversationHistory.slice(0, index);
+        saveActiveSessionMessages();
+        return true;
+    }
+    return false;
+};
 
 // Multi-session exports
 window.getChatSessions = getChatSessions;
@@ -798,5 +906,9 @@ window.getHistoryWindowSize = getHistoryWindowSize;
 window.getContextWindow = getContextWindow;
 window.isThinkingEnabled = isThinkingEnabled;
 window.setThinkingEnabled = setThinkingEnabled;
+
+// Memory exports
+window.getActiveMemories = getActiveMemories;
+window.saveMemoryEntry = saveMemoryEntry;
 
 })();

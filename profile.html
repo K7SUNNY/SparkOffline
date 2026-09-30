@@ -59,7 +59,6 @@
 
       <div class="new-chat-wrapper">
         <button class="new-chat-btn"
-          onclick="window.location.href='/';"
           aria-label="Start New Chat" title="New Chat">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -109,6 +108,23 @@
         </a>
       </nav>
 
+      <!-- chat chat-history-section -->
+      <div class="chat-history-section fade-in-text">
+        <div class="history-label">Recent Chats</div>
+        <div class="sidebar-search-box">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            class="sidebar-search-icon">
+            <circle cx="11" cy="11" r="8"></circle>
+            <path d="m21 21-4.3-4.3"></path>
+          </svg>
+          <input type="text" id="sidebar-search-input" placeholder="Search chats..." class="sidebar-search-field" autocomplete="off" />
+        </div>
+        <div class="history-list" id="sidebar-history-list">
+          <!-- Dynamically populated from chat sessions -->
+        </div>
+      </div>
+
       <div class="sidebar-footer">V2</div>
     </aside>
 
@@ -128,7 +144,7 @@
           </div>
         </div>
         <div class="header-right">
-          <button class="btn btn-secondary small-btn" aria-label="Save Profile Changes">
+          <button id="save-profile-btn" class="btn btn-secondary small-btn" aria-label="Save Profile Changes">
             Save Changes
           </button>
         </div>
@@ -140,8 +156,9 @@
             <div class="hero-bg"></div>
             <div class="hero-content">
               <div class="hero-avatar-wrapper">
-                <img src="assets/avatar.png" alt="Profile" class="hero-avatar" loading="lazy" />
-                <button class="avatar-edit-btn" aria-label="Upload new avatar">
+                <img id="hero-avatar-img" src="assets/avatar.png" alt="Profile" class="hero-avatar" loading="lazy" />
+                <input type="file" id="avatar-file-input" accept="image/*" style="display: none;" />
+                <button type="button" id="avatar-edit-btn" class="avatar-edit-btn" title="Change avatar" aria-label="Upload new avatar">
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12 20h9"></path>
@@ -150,27 +167,27 @@
                 </button>
               </div>
               <div class="hero-text">
-                <h2 class="hero-name">Guest User</h2>
+                <h2 id="profile-hero-name" class="hero-name">Guest User</h2>
                 <div class="hero-badges">
-                  <span class="badge badge-date">Joined Dec 2024</span>
+                  <span id="profile-joined-badge" class="badge badge-date">Joined Local</span>
                 </div>
               </div>
             </div>
 
             <div class="stats-grid">
               <div class="stat-item">
-                <div class="stat-value">1,240</div>
+                <div id="stat-messages-val" class="stat-value">0</div>
                 <div class="stat-label">Messages</div>
               </div>
               <div class="stat-divider"></div>
               <div class="stat-item">
-                <div class="stat-value">48</div>
-                <div class="stat-label">Hours Saved</div>
+                <div id="stat-sessions-val" class="stat-value">0</div>
+                <div class="stat-label">Chats</div>
               </div>
               <div class="stat-divider"></div>
               <div class="stat-item">
-                <div class="stat-value">12</div>
-                <div class="stat-label">Day Streak</div>
+                <div id="stat-memories-val" class="stat-value">0</div>
+                <div class="stat-label">Memories</div>
               </div>
             </div>
           </div>
@@ -182,22 +199,22 @@
             <div class="setting-card form-card">
               <div class="form-row">
                 <div class="form-group">
-                  <label>Full Name</label>
-                  <input type="text" value="Guest User" class="form-input" />
+                  <label for="profile-name">Full Name</label>
+                  <input type="text" id="profile-name" placeholder="Guest User" class="form-input" />
                 </div>
                 <div class="form-group">
-                  <label>Email Address</label>
-                  <input type="email" value="user@example.com" class="form-input" />
+                  <label for="profile-email">Email Address</label>
+                  <input type="email" id="profile-email" placeholder="user@example.com" class="form-input" />
                 </div>
               </div>
               <div class="form-row">
                 <div class="form-group">
-                  <label>Display Name</label>
-                  <input type="text" value="SparkUser" class="form-input" />
+                  <label for="profile-display-name">Display Name</label>
+                  <input type="text" id="profile-display-name" placeholder="SparkUser" class="form-input" />
                 </div>
                 <div class="form-group">
-                  <label>Phone (Optional)</label>
-                  <input type="tel" placeholder="+1 234 567 890" class="form-input" />
+                  <label for="profile-phone">Phone (Optional)</label>
+                  <input type="tel" id="profile-phone" placeholder="+1 234 567 890" class="form-input" />
                 </div>
               </div>
             </div>
@@ -212,23 +229,23 @@
                 <div>
                   <div class="setting-label">Sign Out</div>
                   <div class="setting-desc">
-                    Log out of your account on this device
+                    Log out and clear active session on this device
                   </div>
                 </div>
-                <button class="btn btn-secondary" aria-label="Sign out of account">
+                <button type="button" id="profile-signout-btn" class="btn btn-secondary" aria-label="Sign out of account">
                   Sign Out
                 </button>
               </div>
               <div class="setting-divider"></div>
               <div class="setting-row">
                 <div>
-                  <div class="setting-label text-danger">Delete Account</div>
+                  <div class="setting-label text-danger">Reset All Data</div>
                   <div class="setting-desc">
-                    Permanently delete your account and data
+                    Permanently delete all chat history, memories, and profile
                   </div>
                 </div>
-                <button class="btn btn-danger" aria-label="Delete account permanently">
-                  Delete
+                <button type="button" id="profile-delete-btn" class="btn btn-danger" aria-label="Delete account permanently">
+                  Reset Data
                 </button>
               </div>
             </div>
@@ -275,7 +292,8 @@
     </nav>
   </div>
 
-  <script src="js/script.js?v=10" defer></script>
+  <script src="js/offline-api.js?v=16"></script>
+  <script src="js/script.js?v=16" defer></script>
 </body>
 
 </html>
