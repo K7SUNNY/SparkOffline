@@ -170,9 +170,11 @@ function getActiveSession() {
 function setActiveSessionId(sessionId) {
     activeSessionId = sessionId;
     if (sessionId) {
+        try { localStorage.setItem(STORAGE_KEYS.activeSession, sessionId); } catch (_) {}
         const session = getActiveSession();
         conversationHistory = session ? [...(session.messages || [])] : [];
     } else {
+        try { localStorage.removeItem(STORAGE_KEYS.activeSession); } catch (_) {}
         conversationHistory = [];
     }
 
@@ -217,6 +219,13 @@ function deleteChatSession(sessionId) {
     sessions = sessions.filter(s => s.id !== sessionId);
     saveChatSessions(sessions);
 
+    try {
+        const storedActive = localStorage.getItem(STORAGE_KEYS.activeSession);
+        if (storedActive === sessionId) {
+            localStorage.removeItem(STORAGE_KEYS.activeSession);
+        }
+    } catch (_) {}
+
     if (activeSessionId === sessionId) {
         setActiveSessionId(null);
     } else {
@@ -255,6 +264,7 @@ function saveActiveSessionMessages() {
             messages: [...conversationHistory]
         };
         activeSessionId = currentSession.id;
+        try { localStorage.setItem(STORAGE_KEYS.activeSession, activeSessionId); } catch (_) {}
         sessions.unshift(currentSession);
 
         if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
@@ -267,6 +277,7 @@ function saveActiveSessionMessages() {
     } else {
         currentSession.messages = [...conversationHistory];
         currentSession.updatedAt = Date.now();
+        try { localStorage.setItem(STORAGE_KEYS.activeSession, currentSession.id); } catch (_) {}
         // Update title if it was default
         if (currentSession.title === 'New Conversation') {
             const firstUser = conversationHistory.find(m => m.role === 'user');
@@ -283,6 +294,9 @@ function notifySessionChange() {
     sessionChangeListeners.forEach(listener => {
         try { listener(); } catch (e) { console.error(e); }
     });
+    if (typeof notifyContextUsageChange === 'function') {
+        notifyContextUsageChange();
+    }
 }
 
 function onSessionChange(callback) {
@@ -293,20 +307,19 @@ function onSessionChange(callback) {
 
 /* ==================== INITIALIZE ACTIVE SESSION ==================== */
 function initializeActiveSession() {
-    // Purge any legacy session or history keys so they can never force-restore an old conversation
     try {
-        localStorage.removeItem(STORAGE_KEYS.activeSession);
         localStorage.removeItem(STORAGE_KEYS.legacyHistory);
     } catch (_) {}
 
+    // 1. Explicit ?chat=<id> parameter in URL takes highest priority
     const requestedChatId = getChatIdFromUrl();
-
     if (requestedChatId) {
         const sessions = getChatSessions();
         const matched = sessions.find(s => s.id === requestedChatId);
         if (matched) {
             activeSessionId = matched.id;
             conversationHistory = [...(matched.messages || [])];
+            try { localStorage.setItem(STORAGE_KEYS.activeSession, activeSessionId); } catch (_) {}
             return;
         } else {
             // Clean up invalid chat parameter from URL
@@ -318,7 +331,46 @@ function initializeActiveSession() {
         }
     }
 
-    // Default on startup / fresh open: ALWAYS start in a new chat window!
+    // 2. Explicit ?new=1 or ?new=true query signals starting a fresh new chat
+    if (typeof window !== 'undefined' && window.location && window.location.search) {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('new') === '1' || params.get('new') === 'true') {
+            activeSessionId = null;
+            conversationHistory = [];
+            try { localStorage.removeItem(STORAGE_KEYS.activeSession); } catch (_) {}
+            if (window.history && window.history.replaceState) {
+                try {
+                    window.history.replaceState(null, '', getCleanChatBasePath());
+                } catch (_) {}
+            }
+            return;
+        }
+    }
+
+    // 3. User returned to / from another page (e.g. Memory, Settings, Profile):
+    // Resume their ongoing active session if one exists!
+    try {
+        const storedActiveId = localStorage.getItem(STORAGE_KEYS.activeSession);
+        if (storedActiveId) {
+            const sessions = getChatSessions();
+            const matched = sessions.find(s => s.id === storedActiveId);
+            if (matched) {
+                activeSessionId = matched.id;
+                conversationHistory = [...(matched.messages || [])];
+                if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
+                    try {
+                        const newUrl = `${getCleanChatBasePath()}?chat=${encodeURIComponent(matched.id)}`;
+                        window.history.replaceState({ sessionId: matched.id }, '', newUrl);
+                    } catch (_) {}
+                }
+                return;
+            } else {
+                localStorage.removeItem(STORAGE_KEYS.activeSession);
+            }
+        }
+    } catch (_) {}
+
+    // 4. Default if no previous active session: start in clean new chat
     activeSessionId = null;
     conversationHistory = [];
 }
@@ -335,13 +387,16 @@ if (typeof window !== 'undefined') {
             if (matched) {
                 activeSessionId = matched.id;
                 conversationHistory = [...(matched.messages || [])];
+                try { localStorage.setItem(STORAGE_KEYS.activeSession, activeSessionId); } catch (_) {}
             } else {
                 activeSessionId = null;
                 conversationHistory = [];
+                try { localStorage.removeItem(STORAGE_KEYS.activeSession); } catch (_) {}
             }
         } else {
             activeSessionId = null;
             conversationHistory = [];
+            try { localStorage.removeItem(STORAGE_KEYS.activeSession); } catch (_) {}
         }
         notifySessionChange();
     });
@@ -396,18 +451,20 @@ function setSelectedModel(modelId) {
     console.log('Selected model set to:', modelId);
 }
 
-function getActiveMemories(limit = 10) {
+function getActiveMemories(limit = 15) {
     try {
         const raw = localStorage.getItem(STORAGE_KEYS.memory);
         if (!raw) return [];
         const parsed = JSON.parse(raw);
         if (!Array.isArray(parsed)) return [];
 
-        // Prioritize custom/manual memories first, then learned conversation memories
-        const manual = parsed.filter(m => m && (m.type === 'manual' || !m.assistant));
-        const auto = parsed.filter(m => m && m.type !== 'manual' && m.assistant);
+        // Prioritize: 1) Explicit preferences, 2) Manual custom facts, 3) Chat saved, 4) Legacy/notes
+        const preferences = parsed.filter(m => m && m.type === 'preference');
+        const manual = parsed.filter(m => m && (m.type === 'manual' || (!m.type && !m.assistant)));
+        const chatSaved = parsed.filter(m => m && m.type === 'chat_saved');
+        const legacy = parsed.filter(m => m && m.type !== 'preference' && m.type !== 'manual' && m.type !== 'chat_saved');
 
-        const combined = [...manual, ...auto];
+        const combined = [...preferences, ...manual, ...chatSaved, ...legacy];
         const results = [];
         const seen = new Set();
 
@@ -428,37 +485,102 @@ function getActiveMemories(limit = 10) {
     }
 }
 
-function saveMemoryEntry(userMessage, assistantMessage, type = 'auto') {
+function saveMemoryEntry(userMessage, assistantMessage = '', type = 'manual') {
     const userClean = String(userMessage || '').trim();
-    if (!userClean) return;
-
-    // Filter out trivial greetings, very short queries, or slash commands from auto-memory
-    if (type === 'auto') {
-        if (userClean.length < 15) return;
-        if (/^(hi|hello|hey|yo|thanks|thank you|ok|okay|bye|goodbye|what's up|test)\b/i.test(userClean)) return;
-        if (userClean.startsWith('/')) return;
-    }
+    if (!userClean) return null;
 
     try {
         const raw = localStorage.getItem(STORAGE_KEYS.memory);
         const parsed = JSON.parse(raw || '[]');
         const memory = Array.isArray(parsed) ? parsed : [];
         
-        // Avoid duplicate memories
-        const exists = memory.some(m => (m.user && m.user.toLowerCase() === userClean.toLowerCase()));
-        if (exists) return;
+        // Avoid duplicate memories (case-insensitive check)
+        const exists = memory.some(m => {
+            const existing = String(m.user || m.text || '').trim().toLowerCase();
+            return existing === userClean.toLowerCase();
+        });
+        if (exists) return null;
 
-        memory.unshift({
+        const entry = {
             id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             user: userClean,
             assistant: assistantMessage ? String(assistantMessage).slice(0, 300) : '',
-            type: type,
+            type: type, // 'manual', 'preference', 'chat_saved'
             createdAt: new Date().toISOString()
-        });
+        };
+
+        memory.unshift(entry);
         localStorage.setItem(STORAGE_KEYS.memory, JSON.stringify(memory.slice(0, 500)));
+
+        try {
+            window.dispatchEvent(new CustomEvent('spark_memory_updated', { detail: entry }));
+        } catch (_) {}
+
+        return entry;
     } catch (error) {
         console.warn('Failed to store memory entry:', error);
+        return null;
     }
+}
+
+function extractAndSavePreferences(userPrompt) {
+    const text = String(userPrompt || '').trim();
+    // Only inspect short to medium user messages, avoid code, attachments, JSON
+    if (!text || text.length < 5 || text.length > 500) return null;
+    if (text.startsWith('```') || text.startsWith('[Attached') || text.startsWith('{') || text.startsWith('<')) return null;
+
+    const patterns = [
+        // "Remember that X", "Remember this: X", "Please remember X"
+        {
+            regex: /^(?:please\s+)?remember\s+(?:that\s+|this:?\s*)?(.+)$/i,
+            format: (m) => m[1].trim()
+        },
+        // "Note that X", "Keep in mind that X"
+        {
+            regex: /^(?:please\s+)?(?:note\s+that|keep\s+in\s+mind\s+(?:that\s+)?)(.+)$/i,
+            format: (m) => m[1].trim()
+        },
+        // "I prefer X", "My preference is X"
+        {
+            regex: /^(?:i\s+prefer|my\s+preference\s+is)\s+(.+)$/i,
+            format: (m) => `User prefers: ${m[1].trim()}`
+        },
+        // "Always do X", "Never do X" (standing instructions)
+        {
+            regex: /^(always|never)\s+([^.!?\n]+[.!?]?)/i,
+            format: (m) => `Rule: ${m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase()} ${m[2].trim()}`
+        },
+        // "My name is X", "Call me X"
+        {
+            regex: /^(?:my\s+name\s+is|call\s+me)\s+([A-Za-z0-9_\-\s]{2,40})$/i,
+            format: (m) => `User name: ${m[1].trim()}`
+        },
+        // "I work as a/an X", "I am a/an X"
+        {
+            regex: /^(?:i\s+work\s+as\s+(?:a|an)?\s*|i\s+am\s+(?:a|an)\s+)([A-Za-z0-9_\-\s]{2,40})$/i,
+            format: (m) => `User role: ${m[1].trim()}`
+        },
+        // "My tech stack is X", "I develop with X", "I use X"
+        {
+            regex: /^(?:my\s+(?:tech\s+)?stack\s+is|i\s+(?:mostly\s+)?develop\s+with|i\s+(?:primarily\s+)?use)\s+([^.!?\n]+)/i,
+            format: (m) => `User tech stack: ${m[1].trim()}`
+        }
+    ];
+
+    for (const p of patterns) {
+        const match = text.match(p.regex);
+        if (match) {
+            const formattedFact = p.format(match);
+            if (formattedFact && formattedFact.length >= 3) {
+                const saved = saveMemoryEntry(formattedFact, '', 'preference');
+                if (saved) {
+                    console.log(`[Spark Memory] Extracted preference: "${formattedFact}"`);
+                }
+                return formattedFact;
+            }
+        }
+    }
+    return null;
 }
 
 
@@ -532,31 +654,140 @@ function getContextWindow() {
     return (!isNaN(parsed) && parsed >= 512 && parsed <= 32768) ? parsed : 4096;
 }
 
+function estimateMessageTokens(message) {
+    if (!message) return 0;
+    let tokens = 0;
+    if (typeof message.content === 'string') {
+        const text = message.content;
+        const isStructured = /[<>{}\[\]=_\/\\`~|]/.test(text) && (text.includes('<') || text.includes('{') || text.includes('|'));
+        const charsPerToken = isStructured ? 2.3 : 3.6;
+        tokens += Math.ceil(text.length / charsPerToken);
+    } else if (Array.isArray(message.content)) {
+        for (const part of message.content) {
+            if (part && part.type === 'text' && part.text) {
+                const text = part.text;
+                const isStructured = /[<>{}\[\]=_\/\\`~|]/.test(text) && (text.includes('<') || text.includes('{') || text.includes('|'));
+                const charsPerToken = isStructured ? 2.3 : 3.6;
+                tokens += Math.ceil(text.length / charsPerToken);
+            } else if (part && part.type === 'image_url') {
+                tokens += 420; // 640px image uses ~413 tokens in Qwen2-VL / Qwen3.5
+            }
+        }
+    }
+    if (Array.isArray(message.images) && message.images.length > 0) {
+        tokens += message.images.length * 420;
+    }
+    tokens += 4; // Turn framing overhead
+    return tokens;
+}
+
+function getContextUsage() {
+    const maxTokens = getContextWindow();
+    let usedTokens = 0;
+
+    // 1. System prompt overhead
+    const sysPrompt = cachedSystemPrompt || "You are Spark, an intelligent, helpful, and concise local AI assistant powered by Qwen 3.5.\nYou are running 100% offline and privately on the user's machine.";
+    usedTokens += Math.ceil(sysPrompt.length / 3.8);
+
+    // 2. Active memories overhead
+    const memories = getActiveMemories(15);
+    if (Array.isArray(memories)) {
+        for (const mem of memories) {
+            usedTokens += Math.ceil(String(mem).length / 3.8) + 2;
+        }
+    }
+
+    // 3. Active conversation history turns
+    const maxHistory = getHistoryWindowSize();
+    const effectiveHistory = conversationHistory.length <= maxHistory
+        ? conversationHistory
+        : conversationHistory.slice(-maxHistory);
+
+    for (const msg of effectiveHistory) {
+        usedTokens += estimateMessageTokens(msg);
+    }
+
+    const percentage = Math.min(100, Math.round((usedTokens / maxTokens) * 100));
+    let status = 'healthy';
+    if (percentage >= 90) {
+        status = 'danger';
+    } else if (percentage >= 75) {
+        status = 'warning';
+    }
+
+    return {
+        usedTokens: Math.max(usedTokens, 0),
+        maxTokens: maxTokens,
+        freeTokens: Math.max(maxTokens - usedTokens, 0),
+        percentage: percentage,
+        status: status,
+        totalTurns: effectiveHistory.length,
+        maxHistoryTurns: maxHistory
+    };
+}
+
+function notifyContextUsageChange() {
+    if (typeof window !== 'undefined') {
+        const usage = getContextUsage();
+        window.dispatchEvent(new CustomEvent('spark_context_usage_updated', { detail: usage }));
+    }
+}
+
+function downscaleBase64Image(dataUrl, maxDim = 640) {
+    return new Promise((resolve) => {
+        if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+            return resolve(dataUrl);
+        }
+        if (typeof Image === 'undefined' || typeof document === 'undefined') {
+            return resolve(dataUrl);
+        }
+        const img = new Image();
+        img.onload = () => {
+            if (img.width <= maxDim && img.height <= maxDim) {
+                return resolve(dataUrl);
+            }
+            let width = img.width;
+            let height = img.height;
+            if (width > height) {
+                height = Math.round((height * maxDim) / width);
+                width = maxDim;
+            } else {
+                width = Math.round((width * maxDim) / height);
+                height = maxDim;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', 0.82));
+        };
+        img.onerror = () => resolve(dataUrl);
+        img.src = dataUrl;
+    });
+}
+
 async function buildRequestMessages(history) {
     if (!Array.isArray(history)) return [];
     
-    // Prune history using configurable history window size
-    const maxHistory = getHistoryWindowSize();
-    const recentHistory = history.length <= maxHistory
-        ? [...history]
-        : history.slice(-maxHistory);
+    // 1. Determine context token capacity & generation reservation
+    const maxContextTokens = getContextWindow(); // e.g. 4096 or 8192
+    const outputReserve = Math.min(1024, getMaxTokens());
+    // Safe prompt budget leaving room for generation output
+    const promptBudget = Math.max(1024, maxContextTokens - outputReserve);
 
-    const requestMessages = [];
-
-    // 1. Inject live system prompt from system_prompt.txt
+    // 2. Inject live system prompt from system_prompt.txt
     let systemPrompt = await fetchSystemPrompt();
     if (!systemPrompt) {
         systemPrompt = "You are Spark, an intelligent, helpful, and concise local AI assistant powered by Qwen 3.5.\nYou are running 100% offline and privately on the user's machine.";
     }
 
-    // 2. Dynamically attach the thinking instruction controlled by the Thinking: Off/On button
     if (isThinkingEnabled()) {
         systemPrompt += "\n\n[Instruction: Deep Thinking Mode ENABLED]\nYou should think step-by-step and provide detailed reasoning inside <think>...</think> tags before providing your final answer.";
     } else {
         systemPrompt += "\n\n[Instruction: Fast Response Mode - Thinking DISABLED]\nDo NOT use <think> tags, internal monologue, or chain-of-thought reasoning. Answer directly, concisely, and immediately with the final response only.";
     }
 
-    // 2b. Inject persistent user memories and preferences
     const activeMemories = getActiveMemories(10);
     if (activeMemories.length > 0) {
         systemPrompt += "\n\n[User Memories & Preferences]:\n" +
@@ -564,12 +795,20 @@ async function buildRequestMessages(history) {
             activeMemories.map(m => `• ${m}`).join("\n");
     }
 
-    requestMessages.push({
+    const systemMessage = {
         role: "system",
         content: systemPrompt
-    });
+    };
 
-    // 3. Find the most recent user turn that has attached images
+    const sysTokens = estimateMessageTokens(systemMessage);
+    let remainingBudget = Math.max(512, promptBudget - sysTokens);
+
+    // 3. Format turns from history
+    const maxHistory = getHistoryWindowSize();
+    const recentHistory = history.length <= maxHistory
+        ? [...history]
+        : history.slice(-maxHistory);
+
     let lastImageUserIdx = -1;
     for (let i = recentHistory.length - 1; i >= 0; i--) {
         const item = recentHistory[i];
@@ -579,20 +818,17 @@ async function buildRequestMessages(history) {
         }
     }
 
-    // 4. Clean and format history turns
+    const allFormattedTurns = [];
     for (let i = 0; i < recentHistory.length; i++) {
         const msg = recentHistory[i];
         if (!msg || typeof msg !== 'object') continue;
 
         if (msg.role === 'assistant') {
-            // Strip any <think>...</think> internal blocks from previous assistant messages
-            // This prevents Qwen's chat template from remaining in thinking state and yielding blank replies
             let cleanAssistant = String(msg.content || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
             if (!cleanAssistant) {
-                // If model only had reasoning, remove the tags but keep the text
                 cleanAssistant = String(msg.content || '').replace(/<\/?think>/gi, '').trim() || 'I understand.';
             }
-            requestMessages.push({
+            allFormattedTurns.push({
                 role: "assistant",
                 content: cleanAssistant
             });
@@ -601,8 +837,6 @@ async function buildRequestMessages(history) {
             const textContent = String(msg.content || '').trim();
 
             if (hasImages) {
-                // Only send full base64 images for the most recent image-bearing user turn
-                // Older image turns include a text summary so we don't re-transmit 1024 vision tokens every turn
                 if (i === lastImageUserIdx) {
                     const parts = [];
                     if (textContent) {
@@ -610,15 +844,16 @@ async function buildRequestMessages(history) {
                     } else {
                         parts.push({ type: "text", text: "Please describe or analyze this image." });
                     }
-                    msg.images.forEach(imgUrl => {
+                    for (const imgUrl of msg.images) {
+                        const safeUrl = await downscaleBase64Image(imgUrl, 640);
                         parts.push({
                             type: "image_url",
                             image_url: {
-                                url: imgUrl
+                                url: safeUrl
                             }
                         });
-                    });
-                    requestMessages.push({
+                    }
+                    allFormattedTurns.push({
                         role: "user",
                         content: parts
                     });
@@ -626,13 +861,13 @@ async function buildRequestMessages(history) {
                     const fallbackText = textContent 
                         ? `[User previously attached an image with question]: ${textContent}`
                         : `[User previously attached an image in this conversation]`;
-                    requestMessages.push({
+                    allFormattedTurns.push({
                         role: "user",
                         content: fallbackText
                     });
                 }
             } else {
-                requestMessages.push({
+                allFormattedTurns.push({
                     role: "user",
                     content: textContent || ''
                 });
@@ -640,10 +875,47 @@ async function buildRequestMessages(history) {
         }
     }
 
-    // 5. When Thinking is DISABLED:
-    // Append the assistant prefill '</think>' at the very end of messages!
-    // This tells Qwen's template that thinking has already concluded, completely bypassing
-    // chain-of-thought generation and giving instantaneous (<0.3s) replies with zero waiting!
+    if (allFormattedTurns.length === 0) {
+        return [systemMessage];
+    }
+
+    // 4. Sliding Context Window: Walk backwards from latest turn to oldest
+    // The latest turn MUST always be included
+    const selectedTurns = [];
+    const latestTurn = allFormattedTurns[allFormattedTurns.length - 1];
+    let latestTokens = estimateMessageTokens(latestTurn);
+
+    // If the latest turn alone exceeds the remaining budget, truncate text safely
+    if (latestTokens > remainingBudget) {
+        if (typeof latestTurn.content === 'string') {
+            const isStructured = /[<>{}\[\]=_\/\\`~|]/.test(latestTurn.content);
+            const charsPerTok = isStructured ? 2.3 : 3.5;
+            const maxChars = Math.max(300, Math.floor((remainingBudget - 120) * charsPerTok));
+            latestTurn.content = latestTurn.content.slice(0, maxChars) + "\n\n... [Content truncated to fit within model context capacity] ...";
+            latestTokens = estimateMessageTokens(latestTurn);
+        }
+    }
+
+    selectedTurns.unshift(latestTurn);
+    remainingBudget -= latestTokens;
+
+    // Prepend older turns as long as they fit in the remaining budget
+    for (let i = allFormattedTurns.length - 2; i >= 0; i--) {
+        const turn = allFormattedTurns[i];
+        const tokens = estimateMessageTokens(turn);
+        if (tokens <= remainingBudget) {
+            selectedTurns.unshift(turn);
+            remainingBudget -= tokens;
+        } else {
+            // Context limit reached; older turns naturally roll off
+            console.log(`[Spark Context] Pruning older turn ${i} (${tokens} tokens) to remain within context budget (${remainingBudget} tokens left).`);
+            break;
+        }
+    }
+
+    const requestMessages = [systemMessage, ...selectedTurns];
+
+    // 5. Append assistant prefill if thinking disabled
     if (!isThinkingEnabled()) {
         requestMessages.push({
             role: "assistant",
@@ -723,6 +995,9 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback, att
             } catch (_) {
                 const fallbackText = await response.text();
                 if (fallbackText) serverMessage = fallbackText;
+            }
+            if (/exceeds the available context size/i.test(serverMessage)) {
+                serverMessage = `[Context Limit Exceeded]: The prompt and active conversation exceeded the model's context capacity. Older messages have been rolled off; if this file is extremely large, please attach a smaller excerpt or increase Context Window in Settings.`;
             }
             throw new Error(serverMessage);
         }
@@ -811,7 +1086,8 @@ async function fetchAndStreamResponse(userMessage, signal, uiUpdateCallback, att
 
         conversationHistory.push({ role: "assistant", content: fullRecord });
         saveActiveSessionMessages();
-        saveMemoryEntry(normalizedMessage, fullRecord);
+        // Mem0 Intelligent Memory: Only extract explicit user preferences/facts, NEVER routine dialogue
+        extractAndSavePreferences(normalizedMessage);
         uiUpdateCallback("", true, false, perfStats);
 
     } catch (error) {
@@ -904,11 +1180,15 @@ window.getTemperature = getTemperature;
 window.getMaxTokens = getMaxTokens;
 window.getHistoryWindowSize = getHistoryWindowSize;
 window.getContextWindow = getContextWindow;
+window.getContextUsage = getContextUsage;
+window.estimateMessageTokens = estimateMessageTokens;
+window.notifyContextUsageChange = notifyContextUsageChange;
 window.isThinkingEnabled = isThinkingEnabled;
 window.setThinkingEnabled = setThinkingEnabled;
 
 // Memory exports
 window.getActiveMemories = getActiveMemories;
 window.saveMemoryEntry = saveMemoryEntry;
+window.extractAndSavePreferences = extractAndSavePreferences;
 
 })();

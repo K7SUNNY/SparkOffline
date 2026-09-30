@@ -122,7 +122,7 @@ def pair_models_with_mmproj(models, mmprojs):
 
     return paired
 
-def generate_router_preset(base_dir, models, paired_mmprojs, ctx_size=4096):
+def generate_router_preset(base_dir, models, paired_mmprojs, ctx_size=8192):
     """
     Generates an INI preset file for llama-server router mode.
     Explicitly binds each model with its multimodal projector (mmproj) if available.
@@ -209,7 +209,7 @@ def main():
     
     host = os.getenv("SPARK_HOST", "127.0.0.1")
     port = int(os.getenv("SPARK_PORT", "5000"))
-    ctx_size = int(os.getenv("SPARK_CTX", "4096"))
+    ctx_size = int(os.getenv("SPARK_CTX", "8192"))
     force_cpu = "--cpu" in sys.argv or os.getenv("SPARK_ENGINE", "").lower() == "cpu"
 
     print("=" * 60)

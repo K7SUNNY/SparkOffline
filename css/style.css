@@ -578,6 +578,12 @@ a:focus-visible {
     background: rgba(16, 185, 129, 0.1);
 }
 
+.msg-action-btn.remembered {
+    color: #a78bfa;
+    border-color: rgba(167, 139, 250, 0.45);
+    background: rgba(167, 139, 250, 0.12);
+}
+
 .msg-action-btn.delete:hover {
     color: #ef4444;
     border-color: rgba(239, 68, 68, 0.4);
@@ -869,6 +875,180 @@ a:focus-visible {
 .model-option:hover, .model-option.selected { background-color: var(--bg-hover); }
 .model-name { color: var(--text-primary); font-size: 13px; font-weight: 500; }
 .model-desc { color: var(--text-secondary); font-size: 11px; }
+
+/* ==================== CONTEXT GAUGE PILL & POPOVER ==================== */
+.context-gauge-container {
+    position: relative;
+    display: inline-flex;
+}
+
+.model-pill.context-pill {
+    gap: 6px;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+}
+
+.model-pill.context-pill.warning {
+    border-color: rgba(245, 158, 11, 0.5);
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.08);
+}
+
+.model-pill.context-pill.danger {
+    border-color: rgba(239, 68, 68, 0.6);
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+    animation: contextPulse 2s infinite ease-in-out;
+}
+
+@keyframes contextPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2); }
+}
+
+.context-circle-svg {
+    transform: rotate(-90deg);
+    flex-shrink: 0;
+}
+
+.context-circle-bar {
+    transition: stroke-dasharray 0.3s ease, stroke 0.3s ease;
+}
+
+.context-popover {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 0;
+    width: 260px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    padding: 14px;
+    z-index: 120;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    backdrop-filter: blur(12px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.context-popover.hidden {
+    display: none !important;
+}
+
+.context-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.context-popover-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.context-status-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.context-status-badge.healthy {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+}
+
+.context-status-badge.warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+}
+
+.context-status-badge.danger {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+.context-track {
+    width: 100%;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.context-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+.context-fill.healthy {
+    background: #6366f1;
+}
+
+.context-fill.warning {
+    background: #f59e0b;
+}
+
+.context-fill.danger {
+    background: #ef4444;
+}
+
+.context-metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+    padding: 8px 10px;
+}
+
+.context-metric-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.context-metric-label {
+    font-size: 10px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.context-metric-num {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.context-popover-footer {
+    font-size: 11px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid var(--border-color);
+    padding-top: 8px;
+}
+
+.context-settings-link {
+    color: #6366f1;
+    text-decoration: underline;
+    font-weight: 500;
+}
+.context-settings-link:hover {
+    color: #818cf8;
+}
 
 .send-btn {
     width: 32px;
@@ -1322,6 +1502,33 @@ a:focus-visible {
     color: var(--text-secondary);
 }
 
+.attachment-preview-card.document-card.spreadsheet-card {
+    border-color: rgba(16, 185, 129, 0.4);
+    background: rgba(16, 185, 129, 0.08);
+}
+.attachment-preview-card.document-card.spreadsheet-card .doc-card-icon {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+}
+
+.attachment-preview-card.document-card.xml-card {
+    border-color: rgba(245, 158, 11, 0.4);
+    background: rgba(245, 158, 11, 0.08);
+}
+.attachment-preview-card.document-card.xml-card .doc-card-icon {
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+}
+
+.attachment-preview-card.document-card.json-card {
+    border-color: rgba(6, 182, 212, 0.4);
+    background: rgba(6, 182, 212, 0.08);
+}
+.attachment-preview-card.document-card.json-card .doc-card-icon {
+    background: rgba(6, 182, 212, 0.2);
+    color: #06b6d4;
+}
+
 /* User Message Attached Documents */
 .message-doc-chip {
     display: inline-flex;
@@ -1337,6 +1544,22 @@ a:focus-visible {
     max-width: 280px;
     transition: border-color 0.2s, transform 0.15s;
     user-select: none;
+}
+
+.message-doc-chip.spreadsheet {
+    border-color: rgba(16, 185, 129, 0.4);
+    background: rgba(16, 185, 129, 0.08);
+}
+.message-doc-chip.spreadsheet .doc-chip-icon {
+    color: #10b981;
+}
+
+.message-doc-chip.xml {
+    border-color: rgba(245, 158, 11, 0.4);
+    background: rgba(245, 158, 11, 0.08);
+}
+.message-doc-chip.xml .doc-chip-icon {
+    color: #f59e0b;
 }
 
 .message-doc-chip:hover {

@@ -85,7 +85,7 @@ function syncGlobalProfileUI() {
 
 // ==================== IMAGE ATTACHMENTS & LIGHTBOX HELPERS ====================
 
-function compressImage(file, maxDim = 1280, quality = 0.85) {
+function compressImage(file, maxDim = 640, quality = 0.85) {
     return new Promise((resolve, reject) => {
         if (!file || !file.type.startsWith('image/')) {
             return reject(new Error('File is not an image'));
@@ -403,6 +403,37 @@ function initSidebar() {
             }
         }, 150);
     });
+
+    // Global Chat Navigation Handler: Preserves ongoing conversation state on return
+    const chatNavLinks = document.querySelectorAll(
+        '.sidebar-nav a[href="/"], .sidebar-nav a[href="index.html"], .sidebar-nav a[href="."], .mobile-bottom-nav a[href="/"], .mobile-bottom-nav a[href="index.html"], .mobile-bottom-nav a[href="."]'
+    );
+    chatNavLinks.forEach((link) => {
+        link.addEventListener('click', (e) => {
+            const chatArea = document.getElementById('chat-area');
+            if (chatArea) {
+                e.preventDefault();
+                // Already on chat view: do not reset active conversation!
+                const chatInput = document.getElementById('chat-input');
+                if (chatInput) chatInput.focus();
+                if (typeof scrollToBottom === 'function') scrollToBottom();
+                if (window.innerWidth <= 768 && sidebar) {
+                    sidebar.classList.remove('open');
+                    overlay?.classList.add('hidden');
+                }
+                return;
+            }
+
+            // On subpages (memory.html, settings.html, profile.html):
+            // Check if there is an ongoing active session to resume
+            const lastActiveId = localStorage.getItem('spark_active_session_id') ||
+                (typeof window.getActiveSessionId === 'function' ? window.getActiveSessionId() : null);
+            if (lastActiveId) {
+                e.preventDefault();
+                window.location.href = `index.html?chat=${encodeURIComponent(lastActiveId)}`;
+            }
+        });
+    });
 }
 
 function renderSidebarHistory(filterText = '') {
@@ -519,9 +550,252 @@ function initSidebarHistory() {
     });
 
     renderSidebarHistory();
+}
 
-    if (typeof window.onSessionChange === 'function') {
-        window.onSessionChange(renderSidebarHistory);
+// ==================== OFFLINE SPREADSHEET (.xlsx / .csv) PARSER ====================
+
+async function parseZipEntries(arrayBuffer) {
+    const bytes = new Uint8Array(arrayBuffer);
+    const view = new DataView(arrayBuffer);
+    const entries = {};
+
+    let eocdOffset = -1;
+    for (let i = bytes.length - 22; i >= 0 && i >= bytes.length - 65557; i--) {
+        if (view.getUint32(i, true) === 0x06054b50) {
+            eocdOffset = i;
+            break;
+        }
+    }
+
+    if (eocdOffset === -1) {
+        throw new Error("Invalid ZIP/XLSX archive (EOCD signature missing)");
+    }
+
+    const totalEntries = view.getUint16(eocdOffset + 10, true);
+    const cdOffset = view.getUint32(eocdOffset + 16, true);
+
+    let offset = cdOffset;
+    for (let i = 0; i < totalEntries; i++) {
+        if (offset + 46 > bytes.length || view.getUint32(offset, true) !== 0x02014b50) break;
+
+        const method = view.getUint16(offset + 10, true);
+        const compSize = view.getUint32(offset + 20, true);
+        const nameLen = view.getUint16(offset + 28, true);
+        const extraLen = view.getUint16(offset + 30, true);
+        const commentLen = view.getUint16(offset + 32, true);
+        const localHeaderOffset = view.getUint32(offset + 42, true);
+
+        const nameBytes = bytes.subarray(offset + 46, offset + 46 + nameLen);
+        const filename = new TextDecoder('utf-8').decode(nameBytes);
+
+        if (localHeaderOffset + 30 <= bytes.length) {
+            const localNameLen = view.getUint16(localHeaderOffset + 26, true);
+            const localExtraLen = view.getUint16(localHeaderOffset + 28, true);
+            const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
+            const compData = bytes.subarray(dataStart, dataStart + compSize);
+
+            if (method === 0) {
+                entries[filename] = new TextDecoder('utf-8').decode(compData);
+            } else if (method === 8 && typeof DecompressionStream !== 'undefined') {
+                try {
+                    const ds = new DecompressionStream('deflate-raw');
+                    const writer = ds.writable.getWriter();
+                    writer.write(compData);
+                    writer.close();
+                    const resp = new Response(ds.readable);
+                    const buf = await resp.arrayBuffer();
+                    entries[filename] = new TextDecoder('utf-8').decode(buf);
+                } catch (e) {
+                    console.warn(`Could not decompress XLSX entry ${filename}:`, e);
+                }
+            }
+        }
+
+        offset += 46 + nameLen + extraLen + commentLen;
+    }
+
+    return entries;
+}
+
+function colToIdx(colStr) {
+    let idx = 0;
+    for (let i = 0; i < colStr.length; i++) {
+        idx = idx * 26 + (colStr.toUpperCase().charCodeAt(i) - 64);
+    }
+    return Math.max(0, idx - 1);
+}
+
+function unescapeXml(str) {
+    if (!str) return '';
+    return str
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'");
+}
+
+function parseSharedStrings(xmlStr) {
+    if (!xmlStr) return [];
+    const strings = [];
+    const siRegex = /<si\b[^>]*>([\s\S]*?)<\/si>/gi;
+    let match;
+    while ((match = siRegex.exec(xmlStr)) !== null) {
+        const inner = match[1];
+        let text = '';
+        const tRegex = /<t\b[^>]*>([^<]*)<\/t>/gi;
+        let tMatch;
+        while ((tMatch = tRegex.exec(inner)) !== null) {
+            text += tMatch[1];
+        }
+        strings.push(unescapeXml(text));
+    }
+    return strings;
+}
+
+function parseSheetXmlToRows(xmlStr, sharedStrings) {
+    if (!xmlStr) return [];
+    const rows = [];
+    const rowRegex = /<row\b[^>]*\br="(\d+)"[^>]*>([\s\S]*?)<\/row>/gi;
+    let rowMatch;
+
+    while ((rowMatch = rowRegex.exec(xmlStr)) !== null) {
+        const rowContent = rowMatch[2];
+        const rowCells = [];
+        const cellRegex = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/gi;
+        let cellMatch;
+
+        while ((cellMatch = cellRegex.exec(rowContent)) !== null) {
+            const attrs = cellMatch[1] || '';
+            const inner = cellMatch[2] || '';
+
+            const rMatch = attrs.match(/\br="([A-Z]+)\d+"/i);
+            const tMatch = attrs.match(/\bt="([^"]+)"/i);
+            const colName = rMatch ? rMatch[1] : '';
+            const cellType = tMatch ? tMatch[1] : '';
+
+            let rawVal = '';
+            const vMatch = inner.match(/<v\b[^>]*>([\s\S]*?)<\/v>/i);
+            if (vMatch) {
+                rawVal = vMatch[1];
+            } else {
+                const tInnerMatch = inner.match(/<t\b[^>]*>([\s\S]*?)<\/t>/i);
+                if (tInnerMatch) {
+                    rawVal = tInnerMatch[1];
+                }
+            }
+
+            let val = '';
+            if (cellType === 's' && rawVal !== '') {
+                const sIdx = parseInt(rawVal, 10);
+                val = (!isNaN(sIdx) && sharedStrings[sIdx] !== undefined) ? sharedStrings[sIdx] : '';
+            } else if (cellType === 'b' && rawVal !== '') {
+                val = rawVal === '1' ? 'TRUE' : 'FALSE';
+            } else {
+                val = rawVal;
+            }
+
+            const colIdx = colName ? colToIdx(colName) : rowCells.length;
+            while (rowCells.length < colIdx) {
+                rowCells.push('');
+            }
+            rowCells[colIdx] = unescapeXml(String(val)).trim();
+        }
+
+        if (rowCells.some(c => c !== '')) {
+            rows.push(rowCells);
+        }
+    }
+
+    return rows;
+}
+
+function rowsToMarkdownTable(rows, maxRows = 100) {
+    if (!rows || rows.length === 0) return '_[Empty Sheet]_';
+
+    const header = rows[0];
+    const maxCols = Math.max(...rows.map(r => r.length));
+    if (maxCols === 0) return '_[Empty Sheet]_';
+
+    const normHeader = [];
+    for (let c = 0; c < maxCols; c++) {
+        normHeader.push((header[c] || `Column ${c + 1}`).replace(/\|/g, '\\|').trim());
+    }
+
+    let md = '| ' + normHeader.join(' | ') + ' |\n';
+    md += '| ' + normHeader.map(() => '---').join(' | ') + ' |\n';
+
+    const dataRows = rows.slice(1, maxRows);
+    dataRows.forEach(row => {
+        const line = [];
+        for (let c = 0; c < maxCols; c++) {
+            const val = (row[c] !== undefined ? String(row[c]) : '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim();
+            line.push(val);
+        }
+        md += '| ' + line.join(' | ') + ' |\n';
+    });
+
+    if (rows.length > maxRows) {
+        md += `\n_*(Showing first ${maxRows - 1} rows of ${rows.length - 1} data rows)*_\n`;
+    }
+
+    return md;
+}
+
+function parseCsvToMarkdown(csvText, delimiter = ',') {
+    const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
+    if (lines.length === 0) return '_[Empty CSV]_';
+
+    const rows = lines.map(line => {
+        const pattern = new RegExp(`(?:^|${delimiter})(?:"([^"]*(?:""[^"]*)*)"|([^"${delimiter}]*))`, 'g');
+        const cells = [];
+        let m;
+        while ((m = pattern.exec(line)) !== null) {
+            let val = m[1] !== undefined ? m[1].replace(/""/g, '"') : (m[2] !== undefined ? m[2] : '');
+            cells.push(val.trim());
+        }
+        return cells;
+    });
+
+    return rowsToMarkdownTable(rows, 100);
+}
+
+async function parseXlsxToMarkdown(arrayBuffer, filename = 'Spreadsheet.xlsx') {
+    try {
+        const entries = await parseZipEntries(arrayBuffer);
+        const sharedStrings = parseSharedStrings(entries['xl/sharedStrings.xml'] || '');
+
+        const sheetNames = {};
+        const wbXml = entries['xl/workbook.xml'] || '';
+        const sheetTagRegex = /<sheet\b[^>]*\bname="([^"]+)"[^>]*\bsheetId="([^"]+)"/gi;
+        let sMatch;
+        while ((sMatch = sheetTagRegex.exec(wbXml)) !== null) {
+            sheetNames[`sheet${sMatch[2]}`] = sMatch[1];
+        }
+
+        const sheetKeys = Object.keys(entries).filter(k => k.startsWith('xl/worksheets/sheet') && k.endsWith('.xml'));
+        if (sheetKeys.length === 0) {
+            return `_[Spreadsheet "${filename}" contains no readable worksheets]_`;
+        }
+
+        const markdownSections = [];
+        for (const sheetKey of sheetKeys) {
+            const sheetFile = sheetKey.split('/').pop().replace('.xml', '');
+            const friendlyName = sheetNames[sheetFile] || sheetFile.toUpperCase();
+            const xmlContent = entries[sheetKey];
+            const rows = parseSheetXmlToRows(xmlContent, sharedStrings);
+            if (rows.length > 0) {
+                const tableMd = rowsToMarkdownTable(rows);
+                markdownSections.push(`### Sheet: ${friendlyName}\n\n${tableMd}`);
+            }
+        }
+
+        return markdownSections.length > 0
+            ? markdownSections.join('\n\n---\n\n')
+            : `_[Spreadsheet "${filename}" has empty sheets]_`;
+    } catch (err) {
+        console.error('Error parsing XLSX spreadsheet:', err);
+        return `_[Unable to parse binary spreadsheet "${filename}": ${err.message || 'Corrupted file'}]_`;
     }
 }
 
@@ -593,6 +867,111 @@ function initChatPage() {
             updateThinkingQuickBtn();
         });
     }
+
+    // ==================== CONTEXT WINDOW USAGE GAUGE ====================
+    const contextGaugePill = document.getElementById('context-gauge-pill');
+    const contextGaugeText = document.getElementById('context-gauge-text');
+    const contextCircleBar = document.getElementById('context-circle-bar');
+    const contextPopover = document.getElementById('context-popover');
+    const contextStatusBadge = document.getElementById('context-status-badge');
+    const contextProgressBar = document.getElementById('context-progress-bar');
+    const contextValUsed = document.getElementById('context-val-used');
+    const contextValMax = document.getElementById('context-val-max');
+    const contextValFree = document.getElementById('context-val-free');
+    const contextValTurns = document.getElementById('context-val-turns');
+
+    function formatNumberCommas(num) {
+        return Number(num || 0).toLocaleString();
+    }
+
+    function updateContextGaugeUI(customUsage = null) {
+        if (!contextGaugePill) return;
+
+        const usage = customUsage || (typeof window.getContextUsage === 'function' ? window.getContextUsage() : null);
+        if (!usage) return;
+
+        const { usedTokens, maxTokens, freeTokens, percentage, status, totalTurns } = usage;
+
+        // Update pill label & circular stroke
+        if (contextGaugeText) {
+            contextGaugeText.textContent = `Context: ${percentage}%`;
+        }
+        if (contextCircleBar) {
+            contextCircleBar.setAttribute('stroke-dasharray', `${percentage}, 100`);
+            if (status === 'danger') {
+                contextCircleBar.setAttribute('stroke', '#ef4444');
+            } else if (status === 'warning') {
+                contextCircleBar.setAttribute('stroke', '#f59e0b');
+            } else {
+                contextCircleBar.setAttribute('stroke', '#6366f1');
+            }
+        }
+
+        // Update pill modifier styling
+        contextGaugePill.classList.remove('warning', 'danger');
+        if (status === 'danger') {
+            contextGaugePill.classList.add('danger');
+            contextGaugePill.title = `Context Window: ${percentage}% consumed (${formatNumberCommas(usedTokens)} / ${formatNumberCommas(maxTokens)} tokens). Approaching limit!`;
+        } else if (status === 'warning') {
+            contextGaugePill.classList.add('warning');
+            contextGaugePill.title = `Context Window: ${percentage}% consumed (${formatNumberCommas(usedTokens)} / ${formatNumberCommas(maxTokens)} tokens).`;
+        } else {
+            contextGaugePill.title = `Context Window: ${percentage}% consumed (${formatNumberCommas(usedTokens)} / ${formatNumberCommas(maxTokens)} tokens). Click for details.`;
+        }
+
+        // Update popover card if present
+        if (contextStatusBadge) {
+            contextStatusBadge.className = `context-status-badge ${status}`;
+            contextStatusBadge.textContent = status === 'danger' ? 'Near Limit' : (status === 'warning' ? 'Heavy' : 'Normal');
+        }
+        if (contextProgressBar) {
+            contextProgressBar.className = `context-fill ${status}`;
+            contextProgressBar.style.width = `${percentage}%`;
+        }
+        if (contextValUsed) contextValUsed.textContent = formatNumberCommas(usedTokens);
+        if (contextValMax) contextValMax.textContent = formatNumberCommas(maxTokens);
+        if (contextValFree) contextValFree.textContent = formatNumberCommas(freeTokens);
+        if (contextValTurns) contextValTurns.textContent = formatNumberCommas(totalTurns);
+    }
+
+    if (contextGaugePill && contextPopover) {
+        contextGaugePill.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isHidden = contextPopover.classList.contains('hidden');
+            if (modelMenu && !modelMenu.classList.contains('hidden')) {
+                modelMenu.classList.add('hidden');
+                modelBtn?.classList.remove('active');
+            }
+            contextPopover.classList.toggle('hidden', !isHidden);
+            if (isHidden) {
+                updateContextGaugeUI();
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!contextGaugePill.contains(e.target) && !contextPopover.contains(e.target)) {
+                contextPopover.classList.add('hidden');
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                contextPopover.classList.add('hidden');
+            }
+        });
+    }
+
+    window.addEventListener('spark_context_usage_updated', (e) => {
+        updateContextGaugeUI(e.detail);
+    });
+
+    window.addEventListener('storage', (e) => {
+        if (e.key === 'spark_context_window' || e.key === 'spark_history_window_size') {
+            updateContextGaugeUI();
+        }
+    });
+
+    updateContextGaugeUI();
 
     let isGenerating = false;
     let abortController = null;
@@ -729,7 +1108,42 @@ function initChatPage() {
                 bar.appendChild(ttsBtn);
             }
 
-            // 4. Performance Metrics Badge
+            // 4. Remember / Save Insight to Memory Button
+            const rememberBtn = document.createElement('button');
+            rememberBtn.type = 'button';
+            rememberBtn.className = 'msg-action-btn remember-btn';
+            rememberBtn.title = 'Save insight to memory';
+            rememberBtn.setAttribute('aria-label', 'Save insight to memory');
+            rememberBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+                    <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+                    <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
+                </svg>
+                <span class="btn-tip">Remember</span>
+            `;
+            rememberBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                let cleanText = String(rawText || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim() || String(rawText || '');
+                if (cleanText.length > 300) {
+                    cleanText = cleanText.slice(0, 300).trim() + '...';
+                }
+                if (!cleanText) return;
+
+                if (typeof window.saveMemoryEntry === 'function') {
+                    window.saveMemoryEntry(cleanText, '', 'chat_saved');
+                }
+                const tip = rememberBtn.querySelector('.btn-tip');
+                if (tip) tip.textContent = 'Saved!';
+                rememberBtn.classList.add('remembered');
+                setTimeout(() => {
+                    if (tip) tip.textContent = 'Remember';
+                    rememberBtn.classList.remove('remembered');
+                }, 2000);
+            });
+            bar.appendChild(rememberBtn);
+
+            // 5. Performance Metrics Badge
             if (perfStats && perfStats.tokPerSec) {
                 const perfBadge = document.createElement('span');
                 perfBadge.className = 'perf-stats-chip';
@@ -859,7 +1273,42 @@ function initChatPage() {
             });
             bar.appendChild(editBtn);
 
-            // 3. User Prompt: Delete Turn Button
+            // 3. User Prompt: Remember / Save Fact Button
+            const rememberBtn = document.createElement('button');
+            rememberBtn.type = 'button';
+            rememberBtn.className = 'msg-action-btn remember-btn';
+            rememberBtn.title = 'Save fact to memory';
+            rememberBtn.setAttribute('aria-label', 'Save fact to memory');
+            rememberBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+                    <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+                    <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
+                </svg>
+                <span class="btn-tip">Remember</span>
+            `;
+            rememberBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                let cleanText = String(rawText || '').trim();
+                if (cleanText.length > 300) {
+                    cleanText = cleanText.slice(0, 300).trim() + '...';
+                }
+                if (!cleanText) return;
+
+                if (typeof window.saveMemoryEntry === 'function') {
+                    window.saveMemoryEntry(cleanText, '', 'chat_saved');
+                }
+                const tip = rememberBtn.querySelector('.btn-tip');
+                if (tip) tip.textContent = 'Saved!';
+                rememberBtn.classList.add('remembered');
+                setTimeout(() => {
+                    if (tip) tip.textContent = 'Remember';
+                    rememberBtn.classList.remove('remembered');
+                }, 2000);
+            });
+            bar.appendChild(rememberBtn);
+
+            // 4. User Prompt: Delete Turn Button
             const delBtn = document.createElement('button');
             delBtn.type = 'button';
             delBtn.className = 'msg-action-btn delete';
@@ -1027,15 +1476,43 @@ function initChatPage() {
             docsContainer.className = 'message-attachments-container docs-container';
             docs.forEach((doc) => {
                 const docChip = document.createElement('div');
-                docChip.className = 'message-doc-chip';
+                const isSpreadsheet = doc.isSpreadsheet || doc.type === 'spreadsheet' || doc.ext === 'xlsx' || doc.ext === 'xls';
+                const isXml = doc.ext === 'xml';
+                const isCsv = doc.ext === 'csv' || doc.ext === 'tsv';
+                let chipClass = 'message-doc-chip';
+                if (isSpreadsheet || isCsv) chipClass += ' spreadsheet';
+                else if (isXml) chipClass += ' xml';
+
+                docChip.className = chipClass;
                 docChip.title = `${doc.name || 'Document'} (${doc.sizeStr || ''})`;
-                docChip.innerHTML = `
-                    <span class="doc-chip-icon">
+
+                let iconSvg = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                `;
+                if (isSpreadsheet || isCsv) {
+                    iconSvg = `
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
-                            <polyline points="14 2 14 8 20 8"/>
+                            <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+                            <line x1="3" x2="21" y1="9" y2="9"/>
+                            <line x1="3" x2="21" y1="15" y2="15"/>
+                            <line x1="9" x2="9" y1="3" y2="21"/>
+                            <line x1="15" x2="15" y1="3" y2="21"/>
                         </svg>
-                    </span>
+                    `;
+                } else if (isXml) {
+                    iconSvg = `
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="16 18 22 12 16 6"/>
+                            <polyline points="8 6 2 12 8 18"/>
+                        </svg>
+                    `;
+                }
+
+                docChip.innerHTML = `
+                    <span class="doc-chip-icon">${iconSvg}</span>
                     <span class="doc-chip-name">${escapeHtml(doc.name || 'Document')}</span>
                     ${doc.sizeStr ? `<span class="doc-chip-size">${escapeHtml(doc.sizeStr)}</span>` : ''}
                 `;
@@ -1222,6 +1699,7 @@ function initChatPage() {
 
         if (!Array.isArray(history) || history.length === 0) {
             renderWelcomeScreen();
+            if (typeof updateContextGaugeUI === 'function') updateContextGaugeUI();
             return;
         }
 
@@ -1230,6 +1708,7 @@ function initChatPage() {
         );
         if (visibleMessages.length === 0) {
             renderWelcomeScreen();
+            if (typeof updateContextGaugeUI === 'function') updateContextGaugeUI();
             return;
         }
 
@@ -1240,6 +1719,7 @@ function initChatPage() {
                 appendMessage(message.content || '', 'user', message.images || [], idx, message.documents || message.docs || []);
             }
         });
+        if (typeof updateContextGaugeUI === 'function') updateContextGaugeUI();
         scrollToBottom();
     }
     window.hydrateChatHistory = hydrateChatHistory;
@@ -1280,26 +1760,6 @@ function initChatPage() {
         });
     });
 
-    const chatsNavLinks = document.querySelectorAll('.sidebar-nav a[href="/"], .sidebar-nav a[href="index.html"], .sidebar-nav a[href="."]');
-    chatsNavLinks.forEach((link) => {
-        link.addEventListener('click', (e) => {
-            if (document.getElementById('chat-area')) {
-                e.preventDefault();
-                startNewChat();
-            }
-        });
-    });
-
-    const mobileChatNavLinks = document.querySelectorAll('.mobile-bottom-nav a[href="/"], .mobile-bottom-nav a[href="index.html"], .mobile-bottom-nav a[href="."]');
-    mobileChatNavLinks.forEach((link) => {
-        link.addEventListener('click', (e) => {
-            if (document.getElementById('chat-area')) {
-                e.preventDefault();
-                startNewChat();
-            }
-        });
-    });
-
     const headerProfileBtn = document.querySelector('.top-header .profile-btn');
     headerProfileBtn?.addEventListener('click', () => {
         window.location.href = 'profile.html';
@@ -1312,10 +1772,13 @@ function initChatPage() {
         let promptToSend = message;
         if (attachedDocs.length > 0) {
             const docBlocks = attachedDocs.map(d => {
+                if (d.isSpreadsheet || d.type === 'spreadsheet') {
+                    return `[Attached Spreadsheet: ${d.name}]\n${d.content}`;
+                }
                 const lang = d.ext || 'txt';
                 return `[Attached Document: ${d.name}]\n\`\`\`${lang}\n${d.content}\n\`\`\``;
             }).join('\n\n');
-            promptToSend = docBlocks + (message ? `\n\n${message}` : '\n\nPlease analyze or answer questions about the attached document(s).');
+            promptToSend = docBlocks + (message ? `\n\n${message}` : '\n\nPlease analyze or answer questions about the attached document(s)/spreadsheet(s).');
         }
 
         hideWelcomeIfNeeded();
@@ -1435,7 +1898,7 @@ function initChatPage() {
 
         const message = chatInput.value.trim();
         const attachedImages = pendingAttachments.filter(p => p.type === 'image' || (!p.type && p.dataUrl)).map(p => p.dataUrl);
-        const attachedDocs = pendingAttachments.filter(p => p.type === 'document');
+        const attachedDocs = pendingAttachments.filter(p => p.type === 'document' || p.type === 'spreadsheet' || p.isSpreadsheet);
 
         if (!message && attachedImages.length === 0 && attachedDocs.length === 0) return;
 
@@ -1487,18 +1950,48 @@ function initChatPage() {
         pendingAttachments.forEach((att) => {
             const card = document.createElement('div');
 
-            if (att.type === 'document') {
-                card.className = 'attachment-preview-card document-card';
+            if (att.type === 'document' || att.type === 'spreadsheet' || att.isSpreadsheet) {
+                const isSpreadsheet = att.type === 'spreadsheet' || att.isSpreadsheet;
+                const isXml = att.ext === 'xml';
+                const isJson = att.ext === 'json';
+                const isCsv = att.ext === 'csv' || att.ext === 'tsv';
+
+                let cardClasses = 'attachment-preview-card document-card';
+                if (isSpreadsheet || isCsv) cardClasses += ' spreadsheet-card';
+                else if (isXml) cardClasses += ' xml-card';
+                else if (isJson) cardClasses += ' json-card';
+
+                card.className = cardClasses;
                 card.title = `${att.name} (${att.sizeStr || ''})`;
 
                 const iconWrap = document.createElement('div');
                 iconWrap.className = 'doc-card-icon';
-                iconWrap.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
-                        <polyline points="14 2 14 8 20 8"/>
-                    </svg>
-                `;
+
+                if (isSpreadsheet || isCsv) {
+                    iconWrap.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+                            <line x1="3" x2="21" y1="9" y2="9"/>
+                            <line x1="3" x2="21" y1="15" y2="15"/>
+                            <line x1="9" x2="9" y1="3" y2="21"/>
+                            <line x1="15" x2="15" y1="3" y2="21"/>
+                        </svg>
+                    `;
+                } else if (isXml) {
+                    iconWrap.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="16 18 22 12 16 6"/>
+                            <polyline points="8 6 2 12 8 18"/>
+                        </svg>
+                    `;
+                } else {
+                    iconWrap.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                    `;
+                }
                 card.appendChild(iconWrap);
 
                 const infoWrap = document.createElement('div');
@@ -1554,9 +2047,11 @@ function initChatPage() {
         const fileList = Array.from(files);
 
         for (const file of fileList) {
+            const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : 'txt';
+
             if (file.type && file.type.startsWith('image/')) {
                 try {
-                    const compressed = await compressImage(file, 1280, 0.85);
+                    const compressed = await compressImage(file, 640, 0.85);
                     pendingAttachments.push({
                         id: compressed.id,
                         type: 'image',
@@ -1566,10 +2061,32 @@ function initChatPage() {
                 } catch (err) {
                     console.error('Error compressing attached image:', err);
                 }
+            } else if (ext === 'xlsx' || ext === 'xls') {
+                if (file.size > 20 * 1024 * 1024) {
+                    alert(`Spreadsheet "${file.name}" is larger than 20MB. Please select smaller files for offline processing.`);
+                    continue;
+                }
+
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const markdownTable = await parseXlsxToMarkdown(arrayBuffer, file.name);
+                    pendingAttachments.push({
+                        id: 'sheet-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+                        type: 'spreadsheet',
+                        name: file.name,
+                        ext: ext,
+                        sizeStr: formatBytes(file.size),
+                        content: markdownTable,
+                        isSpreadsheet: true
+                    });
+                } catch (err) {
+                    console.error('Error parsing spreadsheet:', err);
+                    alert(`Could not process spreadsheet "${file.name}": ${err.message || err}`);
+                }
             } else {
-                // Text or Code document
-                if (file.size > 2 * 1024 * 1024) {
-                    alert(`File "${file.name}" is larger than 2MB. Please select smaller files for offline processing.`);
+                // Text, Code, XML, JSON, CSV, TSV, SQL, Markdown, etc.
+                if (file.size > 10 * 1024 * 1024) {
+                    alert(`File "${file.name}" is larger than 10MB. Please select smaller files for offline processing.`);
                     continue;
                 }
 
@@ -1581,14 +2098,24 @@ function initChatPage() {
                         reader.readAsText(file);
                     });
 
-                    const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : 'txt';
+                    let finalContent = textContent;
+                    let isSpreadsheet = false;
+                    if (ext === 'csv') {
+                        finalContent = parseCsvToMarkdown(textContent, ',');
+                        isSpreadsheet = true;
+                    } else if (ext === 'tsv') {
+                        finalContent = parseCsvToMarkdown(textContent, '\t');
+                        isSpreadsheet = true;
+                    }
+
                     pendingAttachments.push({
                         id: 'doc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
-                        type: 'document',
+                        type: isSpreadsheet ? 'spreadsheet' : 'document',
                         name: file.name,
                         ext: ext,
                         sizeStr: formatBytes(file.size),
-                        content: textContent
+                        content: finalContent,
+                        isSpreadsheet: isSpreadsheet
                     });
                 } catch (err) {
                     console.error('Error reading document file:', err);
@@ -1829,10 +2356,27 @@ function initMemoryPage() {
             const textWrap = document.createElement('div');
             textWrap.className = 'memory-text';
 
-            const isManual = item.type === 'manual' || !item.assistant;
+            const type = item.type || (item.assistant ? 'auto' : 'manual');
             const badge = document.createElement('span');
-            badge.className = 'memory-badge' + (isManual ? ' manual' : '');
-            badge.textContent = isManual ? 'Custom Fact' : 'Conversation';
+            let badgeClass = 'memory-badge';
+            let badgeLabel = 'Custom Fact';
+
+            if (type === 'preference') {
+                badgeClass += ' badge-preference';
+                badgeLabel = 'Preference';
+            } else if (type === 'chat_saved') {
+                badgeClass += ' badge-saved';
+                badgeLabel = 'Saved in Chat';
+            } else if (type === 'manual') {
+                badgeClass += ' badge-manual';
+                badgeLabel = 'Custom Fact';
+            } else {
+                badgeClass += ' badge-note';
+                badgeLabel = 'Note';
+            }
+
+            badge.className = badgeClass;
+            badge.textContent = badgeLabel;
             textWrap.appendChild(badge);
 
             const textSpan = document.createElement('span');
@@ -1915,6 +2459,11 @@ function initMemoryPage() {
 
         memoryItems = memoryItems.filter((item) => item.id !== id);
         saveMemory(memoryItems);
+        renderMemory(searchInput?.value || '');
+    });
+
+    window.addEventListener('spark_memory_updated', () => {
+        memoryItems = loadMemory();
         renderMemory(searchInput?.value || '');
     });
 
