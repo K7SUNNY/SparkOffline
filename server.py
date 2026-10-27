@@ -10,8 +10,10 @@ import os
 import sys
 import time
 import glob
+import json
 import struct
 import signal
+import threading
 import subprocess
 import webbrowser
 from urllib.request import urlopen, Request
@@ -133,6 +135,8 @@ def generate_router_preset(base_dir, models, paired_mmprojs, ctx_size=8192):
         "version = 1\n",
         "[*]",
         f"ctx-size = {ctx_size}",
+        "n-gpu-layers = 99",
+        "flash-attn = auto",
         "mmproj-device = none\n"
     ]
 
@@ -203,6 +207,30 @@ def wait_for_server(process, url, timeout=20):
         time.sleep(0.5)
     return False
 
+def warmup_model(host, port, model_name):
+    """
+    Pre-loads the model into GPU VRAM and pre-compiles compute shaders in the background
+    upon server launch, eliminating the cold-start delay on the user's first prompt.
+    """
+    try:
+        url = f"http://{host}:{port}/v1/chat/completions"
+        payload = json.dumps({
+            "model": model_name,
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 1
+        }).encode("utf-8")
+        req = Request(url, data=payload, headers={
+            "Content-Type": "application/json",
+            "User-Agent": "SparkV2-Warmup"
+        })
+        with urlopen(req, timeout=30.0) as resp:
+            if resp.status == 200:
+                print(f"[INFO] Model '{model_name}' pre-warmed in GPU VRAM! Ready for instant generation.")
+                return True
+    except Exception:
+        pass
+    return False
+
 def main():
     base_dir = os.path.abspath(os.path.dirname(__file__))
     models_dir = os.path.join(base_dir, "models")
@@ -259,7 +287,7 @@ def main():
     print(f"[INFO] Preset: {os.path.basename(preset_ini)} (Multimodal Vision Active)")
     print("=" * 60)
 
-    # Launch in router mode with preset
+    # Launch in router mode with preset and hardware acceleration
     cmd = [
         server_exe,
         "--models-preset", preset_ini,
@@ -267,7 +295,9 @@ def main():
         "--path", base_dir,
         "--port", str(port),
         "--host", host,
-        "-c", str(ctx_size)
+        "-c", str(ctx_size),
+        "-ngl", "99",
+        "-fa", "auto"
     ]
     if "vulkan" in server_exe.lower():
         cmd.extend(["-mmdev", "none"])
@@ -283,6 +313,24 @@ def main():
         print("\n[INFO] Starting inference server and verifying readiness...")
         if wait_for_server(process, server_url, timeout=20):
             print(f"[INFO] Engine & Web UI confirmed ready! Opening {server_url}/\n")
+
+            # Identify active default model to pre-warm in GPU VRAM
+            default_model = None
+            if models:
+                for m in models:
+                    b = os.path.basename(m)
+                    if "2b" in b.lower():
+                        default_model = b[:-5] if b.lower().endswith(".gguf") else b
+                        break
+                if not default_model:
+                    b = os.path.basename(models[0])
+                    default_model = b[:-5] if b.lower().endswith(".gguf") else b
+
+            if default_model:
+                print(f"[INFO] Pre-warming '{default_model}' into GPU VRAM in background (eliminates first-prompt delay)...")
+                warmup_thread = threading.Thread(target=warmup_model, args=(host, port, default_model), daemon=True)
+                warmup_thread.start()
+
             time.sleep(0.5)
             webbrowser.open(f"{server_url}/")
         else:
