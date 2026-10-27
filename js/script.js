@@ -1666,7 +1666,7 @@ function initChatPage() {
             opt.innerHTML = `
                 <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
                     <span class="model-name">${escapeHtml(cleanName)}</span>
-                    ${isVision ? '<span style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 6px; background: rgba(99, 102, 241, 0.18); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.35);">Vision</span>' : ''}
+                    ${isVision ? '<span style="font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 6px; background: #222632; color: #ededed; border: 1px solid rgba(255, 255, 255, 0.12);">Vision</span>' : ''}
                 </div>
                 <span class="model-desc">${escapeHtml(cleanName)}.gguf ${isVision ? '· Multimodal Active' : ''}</span>
             `;
@@ -1681,15 +1681,71 @@ function initChatPage() {
 
         setSelectedModel(activeModel);
     }
+    window.loadDynamicModels = loadDynamicModels;
 
     function renderWelcomeScreen() {
         chatArea.innerHTML = `
             <div id="welcome-screen" class="welcome-screen">
-                <h2>Hey, I'm Spark</h2>
-                <p>Powered by <strong>Qwen 3.5</strong> on your device with hardware acceleration. Ask me anything...</p>
+                <h2>What can I help with?</h2>
+                <p>Offline conversations with local models. Private, on-device intelligence.</p>
+
+                <div class="welcome-bento-grid">
+                    <button type="button" class="welcome-bento-card" data-prompt="Explain this code, find bugs, or suggest architectural improvements:">
+                        <div class="bento-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                        </div>
+                        <div class="bento-text">
+                            <div class="bento-title">Code & Debug</div>
+                            <div class="bento-desc">Explain code, write scripts & find bugs</div>
+                        </div>
+                    </button>
+
+                    <button type="button" class="welcome-bento-card" data-prompt="Help me draft a clear, professional email or document about:">
+                        <div class="bento-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                        </div>
+                        <div class="bento-text">
+                            <div class="bento-title">Draft & Edit</div>
+                            <div class="bento-desc">Write summaries, emails or reports</div>
+                        </div>
+                    </button>
+
+                    <button type="button" class="welcome-bento-card" data-prompt="Analyze this data, extract key insights, and summarize findings:">
+                        <div class="bento-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                        </div>
+                        <div class="bento-text">
+                            <div class="bento-title">Analyze Data</div>
+                            <div class="bento-desc">Extract insights, logs & summaries</div>
+                        </div>
+                    </button>
+
+                    <button type="button" class="welcome-bento-card" data-prompt="Help me brainstorm ideas and outline an action plan for:">
+                        <div class="bento-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="M2 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="M12 22v-4"/><path d="m19.07 19.07-2.83-2.83"/><path d="M22 12h-4"/><path d="m19.07 4.93-2.83 2.83"/></svg>
+                        </div>
+                        <div class="bento-text">
+                            <div class="bento-title">Brainstorm Ideas</div>
+                            <div class="bento-desc">Explore solutions & creative plans</div>
+                        </div>
+                    </button>
+                </div>
             </div>
         `;
     }
+
+    // Delegate clicks on welcome bento prompt cards
+    chatArea?.addEventListener('click', (e) => {
+        const bentoCard = e.target.closest('.welcome-bento-card');
+        if (bentoCard && bentoCard.dataset.prompt) {
+            chatInput.value = bentoCard.dataset.prompt;
+            chatInput.style.height = 'auto';
+            chatInput.style.height = Math.min(chatInput.scrollHeight, 150) + 'px';
+            updateSendBtnState();
+            chatInput.focus();
+            handleFormSubmit();
+        }
+    });
 
     function hydrateChatHistory() {
         if (typeof window.getConversationHistory !== 'function') return;
@@ -2204,10 +2260,8 @@ function initChatPage() {
         }
     });
 
-    // Chat input keydown: Enter to submit, ArrowUp on empty input to recall last prompt
+    // Chat input keydown: Enter to submit across ALL screen sizes, Shift+Enter for newline, ArrowUp on empty input to recall last prompt
     chatInput.addEventListener('keydown', (e) => {
-        const isMobile = window.innerWidth <= 768;
-
         if (e.key === 'ArrowUp' && chatInput.value === '') {
             e.preventDefault();
             const history = typeof window.getConversationHistory === 'function' ? window.getConversationHistory() : [];
@@ -2222,12 +2276,9 @@ function initChatPage() {
             return;
         }
 
-        if (e.key === 'Enter') {
-            if (isMobile) return;
-            if (!e.shiftKey) {
-                e.preventDefault();
-                if (!sendBtn.disabled) handleFormSubmit();
-            }
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (!sendBtn.disabled) handleFormSubmit();
         }
     });
 
@@ -2241,21 +2292,6 @@ function initChatPage() {
         e.preventDefault();
         handleFormSubmit();
     });
-
-    if (mobileNav) {
-        chatInput.addEventListener('focus', () => {
-            if (window.innerWidth <= 768) {
-                mobileNav.style.display = 'none';
-                inputArea.style.bottom = '0px';
-                setTimeout(scrollToBottom, 300);
-            }
-        });
-
-        chatInput.addEventListener('blur', () => {
-            mobileNav.style.display = '';
-            inputArea.style.bottom = '';
-        });
-    }
 
     chatInput.addEventListener('focus', () => setTimeout(scrollToBottom, 100));
 
@@ -2298,7 +2334,9 @@ async function updateServerStatusIndicator() {
         if (label) label.textContent = 'Qwen Online';
         const modelMenu = document.getElementById('model-menu');
         if (modelMenu && (!modelMenu.children.length || modelMenu.querySelector('.model-option[style]'))) {
-            loadDynamicModels();
+            if (typeof window.loadDynamicModels === 'function') {
+                window.loadDynamicModels();
+            }
         }
     } else {
         indicator.style.backgroundColor = '#ef4444';

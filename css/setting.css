@@ -2,11 +2,11 @@
 :root {
     /* ... existing variables ... */
     
-    /* Toggle Switch (Dark Mode Default) */
-    --toggle-bg-off: #3f3f46;
+    /* Toggle Switch (Web3 Radiant Mode) */
+    --toggle-bg-off: rgba(255, 255, 255, 0.15);
     --toggle-dot-off: #ffffff;
-    --toggle-bg-on: #fafafa;   /* White when on */
-    --toggle-dot-on: #000000;  /* Black dot when on */
+    --toggle-bg-on: #8b5cf6;   /* Electric violet when on */
+    --toggle-dot-on: #ffffff;  /* White dot when on */
 }
 
 [data-theme="light"] {
@@ -15,7 +15,7 @@
     /* Toggle Switch (Light Mode: iOS Style) */
     --toggle-bg-off: #e4e4e7;  /* Light gray when off */
     --toggle-dot-off: #ffffff; /* White dot */
-    --toggle-bg-on: #18181b;   /* Black when on */
+    --toggle-bg-on: #8b5cf6;   /* Purple when on */
     --toggle-dot-on: #ffffff;  /* White dot when on */
 }
 
@@ -42,7 +42,8 @@
 
 .section-header h2 {
     font-size: 18px;
-    font-weight: 500;
+    font-weight: 600;
+    letter-spacing: -0.01em;
     color: var(--text-primary);
 }
 
@@ -55,12 +56,18 @@
 /* 3. Cards */
 .setting-card {
     background-color: var(--bg-card);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border: 1px solid var(--border-color);
-    border-radius: 12px;
+    border-radius: 14px;
     overflow: visible; 
     position: relative; 
-    /* Light Mode Polish: Add shadow, remove border */
-    transition: box-shadow 0.2s;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.setting-card:hover {
+    border-color: rgba(139, 92, 246, 0.3);
 }
 
 [data-theme="light"] .setting-card {
@@ -213,11 +220,32 @@ input:checked + .slider:before {
     transform: translateX(20px);
 }
 
-/* 7. Mobile Responsive Fixes */
+/* 7. Universal Responsive Layout */
 @media (max-width: 768px) {
     .settings-scroll-area {
-        padding-top: 80px; 
-        padding-bottom: 100px;
+        padding: 20px 16px 32px 16px;
+    }
+}
+
+@media (max-width: 480px) {
+    .settings-scroll-area {
+        padding: 16px 12px 28px 12px;
+    }
+    .setting-row {
+        padding: 12px;
+        gap: 8px;
+    }
+}
+
+@media (max-width: 300px) {
+    .settings-scroll-area {
+        padding: 10px 6px 20px 6px;
+    }
+    .setting-card {
+        border-radius: 8px;
+    }
+    .setting-row {
+        padding: 10px 8px;
     }
 }
 

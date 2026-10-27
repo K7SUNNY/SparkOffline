@@ -2,14 +2,14 @@
 :root {
     /* ... existing variables ... */
     
-    /* Hero Banner Gradient (Dark Mode Default) */
-    --hero-gradient-start: #27272a;
-    --hero-gradient-end: #18181b;
+    /* Hero Banner Subtle Slate (Matte Dark Mode) */
+    --hero-gradient-start: #1c202a;
+    --hero-gradient-end: #141720;
 
-    /* Pro Badge (Dark Mode Default: Bright Yellow) */
-    --badge-pro-bg: rgba(250, 204, 21, 0.15);
-    --badge-pro-text: #facc15;
-    --badge-pro-border: rgba(250, 204, 21, 0.2);
+    /* Pro Badge (Refined Slate Chip) */
+    --badge-pro-bg: #222632;
+    --badge-pro-text: #ededed;
+    --badge-pro-border: rgba(255, 255, 255, 0.12);
 }
 
 [data-theme="light"] {
@@ -36,20 +36,25 @@
 .settings-scroll-area {
     flex: 1; 
     overflow-y: auto; 
-    padding: 20px;
-    padding-bottom: 100px; 
+    padding: 24px 20px 40px 20px;
 }
 
 /* 1. Hero Card */
 .profile-hero-card {
     background-color: var(--bg-card);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border: 1px solid var(--border-color);
-    border-radius: 12px;
+    border-radius: 16px;
     overflow: hidden;
     position: relative;
-    margin-bottom: 32px;
-    /* Add shadow in light mode only */
-    transition: box-shadow 0.2s;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+    transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.profile-hero-card:hover {
+    border-color: rgba(255, 255, 255, 0.18);
 }
 
 [data-theme="light"] .profile-hero-card {
@@ -281,19 +286,58 @@
     text-align: right;
 }
 
-/* Mobile Adjustments */
+/* ==================== UNIVERSAL RESPONSIVE ADJUSTMENTS ==================== */
+@media (max-width: 768px) {
+    .settings-scroll-area {
+        padding: 20px 16px 32px 16px;
+    }
+}
+
 @media (max-width: 600px) {
-    .form-row { flex-direction: column; gap: 16px; }
-    .stats-grid { flex-direction: row; }
+    .form-row { flex-direction: column; gap: 14px; }
+    .stats-grid { flex-direction: row; gap: 10px; }
     .stat-value { font-size: 16px; }
     .stat-label { font-size: 10px; }
 }
 
-/* Mobile Scroll Fix */
-@media (max-width: 768px) {
+@media (max-width: 480px) {
     .settings-scroll-area {
-        padding-bottom: 180px !important; 
-        /* padding-bottom: calc(100px + env(safe-area-inset-bottom)) !important; */
+        padding: 16px 12px 28px 12px;
+    }
+    .hero-content {
+        padding: 16px;
+    }
+    .stats-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
+    }
+    .stat-item {
+        padding: 10px 6px;
+    }
+}
+
+@media (max-width: 300px) {
+    .settings-scroll-area {
+        padding: 10px 6px 20px 6px;
+    }
+    .hero-avatar {
+        width: 60px;
+        height: 60px;
+    }
+    .hero-content {
+        padding: 12px 8px;
+        margin-top: -30px;
+    }
+    .stats-grid {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+    .setting-row {
+        padding: 10px 8px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
     }
 }
 
