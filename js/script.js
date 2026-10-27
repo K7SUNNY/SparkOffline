@@ -1734,16 +1734,17 @@ function initChatPage() {
         `;
     }
 
-    // Delegate clicks on welcome bento prompt cards
+    // Delegate clicks on welcome bento prompt cards (pastes prompt into input without auto-sending)
     chatArea?.addEventListener('click', (e) => {
         const bentoCard = e.target.closest('.welcome-bento-card');
         if (bentoCard && bentoCard.dataset.prompt) {
-            chatInput.value = bentoCard.dataset.prompt;
+            const promptText = bentoCard.dataset.prompt.trim();
+            chatInput.value = promptText.endsWith(':') ? promptText + ' ' : promptText;
             chatInput.style.height = 'auto';
             chatInput.style.height = Math.min(chatInput.scrollHeight, 150) + 'px';
             updateSendBtnState();
             chatInput.focus();
-            handleFormSubmit();
+            chatInput.selectionStart = chatInput.selectionEnd = chatInput.value.length;
         }
     });
 
